@@ -31,7 +31,7 @@ int fs_ready(void)
 	return 1;
 }
 
-/* stat does the existence open itself (0xa5144 mode 0x100), so probing with it
+/* stat does the existence open itself (0xa5318 mode 0x100), so probing with it
  * keeps a single handle on the file at a time */
 s32 fs_read(const char *path, char **buf, u32 max)
 {

@@ -1,8 +1,14 @@
 #ifndef V5_H
 #define V5_H
 
-/* The patch's features, in the unused RAM gap of the Godox C100 firmware (docs/hooks.md).
+/* The patch's features for the Godox C100 firmware (docs/hooks.md): the boot-time
+ * layer in the unused RAM gap, the features in an overlay read from NOR.
  * Shared declarations; stock addresses live in fw.h. */
+
+/* Calls through a register: gap and overlay are ~15.7 MB apart, past Thumb BL
+ * range, and a Thumb BL to ARM code gets a linker veneer. patch.py refuses a
+ * link with any veneer. */
+#define CROSS __attribute__((long_call))
 
 typedef unsigned int u32;
 typedef int s32;
@@ -37,7 +43,8 @@ struct v5_led {
 };
 extern struct v5_led led;
 
-/* misc state, owned by state.c */
+/* misc state, in the gap (src/loader.c): the stubs read booted and write
+ * sound_pending before the overlay is loaded */
 struct v5_state {
 	u8 usb_active;    /* what is posted now: USB_NONE / USB_DRIVE / USB_WEBCAM */
 	u8 usb_pending;   /* wanted personality, deferred because the bus is busy */
@@ -45,10 +52,12 @@ struct v5_state {
 	u8 card_stale;    /* camera FS must remount after an SD uninit */
 	u8 toggle_req;    /* set by the long-press stub, applied by the tick */
 	u8 sound_pending; /* power-on chime id to replay once C100.TXT is known, else 0 */
-	u8 booted;        /* settings have been loaded */
+	u8 booted;        /* the arm flag: load_settings ran on this boot's overlay */
 	u8 ejecting;      /* v5_eject_cb is inside the stock uninit */
 	u32 next_cmd_ms; /* CMD.TXT poll throttle */
 	u32 next_log_ms; /* log_poll throttle, log_flush ignores it */
+	u8 loaded;       /* the overlay was read and checked on this boot */
+	u8 load_err;     /* why the last load failed, 0 = it did not (loader.c) */
 };
 extern struct v5_state st;
 
@@ -66,12 +75,12 @@ u32 log_take(char *dst, u32 max); /* pops at most max bytes */
 u32 log_dropped(void);            /* read and clear */
 void log_grow(char *buf, u32 newsize); /* power of two, from fw_malloc */
 void log_poll(void);              /* throttled flush, from the tick */
-void logcap(const char *line);    /* from the 0x535e0 stub: append one printf line */
+void logcap(const char *line);    /* from the 0x537b4 stub: append one printf line */
 void log_flush(void);             /* unthrottled: drain the ring to LOG.TXT and flush */
 
 /* ---- cfg.c ---- */
-void cfg_defaults(void);
-void cfg_parse(char *text, u32 len); /* text[len] must be 0, modified in place */
+void cfg_defaults(struct v5_cfg *c);
+void cfg_parse(struct v5_cfg *c, char *text, u32 len); /* text[len] must be 0, modified in place */
 
 /* ---- cmd.c ---- */
 void cmd_run(char *text, u32 len); /* text[len] must be 0 */
@@ -85,23 +94,26 @@ void led_init(void); /* baked-in LED levels, call before cfg_apply */
 s32 fs_read(const char *path, char **buf, u32 max);
 void fs_append(const char *path, const char *data, u32 n); /* create if absent */
 s32 fs_delete(const char *path);
-void fs_flush(void); /* 0x9aa98(DRIVE_G) */
+void fs_flush(void); /* 0x9ac6c(DRIVE_G) */
 s32 fs_size(const char *path); /* -1 absent, else size clamped to 31 bits */
 int fs_ready(void);            /* the camera may use the card now */
 
 /* ---- settings.c ---- */
-void load_settings(void); /* from the 0x37df4 mount hook: read C100.TXT, apply */
+CROSS void load_settings(void); /* overlay entry, from v5_set: read C100.TXT, apply, arm */
+
+/* ---- loader.c (gap) ---- */
+void v5_set(void); /* from the 0x37fa0 mount hook: load the overlay once, then load_settings */
 
 /* ---- tick.c ---- */
-void v5_tick(void); /* from the 0x22238 hook, after fw_seg_refresh() */
+void v5_tick(void); /* from the 0x22360 hook, after fw_seg_refresh() */
 u32 v5_ms(void);    /* fw_ticks(), 1 ms; compare with a signed difference */
 
 /* ---- usb.c ---- */
-void v5_usb_plugin(void); /* from the 0x1f540 stub */
-void v5_usb_unplug(void); /* from the 0x1f4c0 stub; returns without calling
-			   * 0xbde60 when it posted an uninit itself */
-void v5_usb_tick(void);   /* from the 0x22354 stub, after fw_usb_vbus_tick() */
-u32 v5_eject_cb(u32 lun); /* replaces the pool word at 0xe0848 */
+void v5_usb_plugin(void); /* from the 0x1f5b0 stub */
+void v5_usb_unplug(void); /* from the 0x1f530 stub; returns without calling
+			   * 0xbdf04 when it posted an uninit itself */
+void v5_usb_tick(void);   /* from the 0x2247c stub, after fw_usb_vbus_tick() */
+u32 v5_eject_cb(u32 lun); /* from eject_stub (the word at 0xe0978), armed only */
 void usb_apply(void);     /* act on cfg.usb[] changes from the tick */
 
 /* ---- act.c ---- */
@@ -115,8 +127,9 @@ void act_long_select(void);    /* the C side of the K1 gesture */
 void act_tick(void);           /* from v5_tick every pass: LCD, LED, chime, handback */
 void act_host_released(void);  /* start the drive handback; act_tick writes LUN 0 once idle */
 
-/* ---- stubs.S ---- */
-u32 v5_irq_save(void);
-void v5_irq_restore(u32 cpsr);
+/* ---- stubs.S (gap) ---- */
+CROSS u32 v5_irq_save(void);
+CROSS void v5_irq_restore(u32 cpsr);
+CROSS void v5_icache_inval(void); /* ARM; through a register, so the linker adds no veneer */
 
 #endif /* V5_H */

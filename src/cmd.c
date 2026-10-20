@@ -39,10 +39,10 @@ static void run_line(char *line)
 		    v5_streq(t[0], "sound")) && n == 2) {
 		char kv[32];
 		v5_fmt(kv, sizeof(kv), "%s=%s", t[0], t[1]);
-		cfg_parse(kv, v5_strlen(kv));
+		cfg_parse(&cfg, kv, v5_strlen(kv));
 		cfg_apply();
 	} else if (v5_streq(t[0], "set") && n == 2) {
-		cfg_parse(t[1], v5_strlen(t[1]));
+		cfg_parse(&cfg, t[1], v5_strlen(t[1]));
 		cfg_apply();
 	} else {
 		v5_log("cmd: bad %s", t[0]);

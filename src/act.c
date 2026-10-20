@@ -74,7 +74,8 @@ void act_sound(u8 on)
 	v5_log("sound %s", on ? "on" : "off");
 }
 
-/* the power-on chime act_sound_gate held before C100.TXT was known */
+/* the sound id (2 or 3) the S1 stub held while disarmed; in V1.1.6 only the
+ * startup chime plays id 2 and nothing plays id 3 */
 static void chime(void)
 {
 	u32 c;
@@ -115,8 +116,8 @@ void cfg_apply(void)
 }
 
 /* S1, play_effect entry, called from the ARM stub in whatever task plays the
- * effect (the AP task in stock). Armed only: before that the stub parks the
- * power-on chime for chime() itself. */
+ * effect (the AP task in stock). Armed only: before that the stub holds ids 2
+ * and 3 for chime() itself. */
 s32 act_sound_gate(s32 id)
 {
 	(void)id;
@@ -134,8 +135,8 @@ void act_long_select(void)
 	v5_log("toggle");
 }
 
-/* Posted rather than calling fw_reboot: every stock caller of 0x1fb3c runs
- * in the AP task, the video state stops its pipeline (0x3523c) before it, and
+/* Posted rather than calling fw_reboot: every stock caller of 0x1fbac runs
+ * in the AP task, the video state stops its pipeline (0x353f4) before it, and
  * if the power does not drop (as it might with VBUS present) the endless loop
  * at its end parks the AP task while the peripheral task keeps the keys and
  * the Off switch. Returns only when refused or still powered, logging

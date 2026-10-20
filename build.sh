@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the patched firmware from the stock V1.1.3 GP_CARDVR_UPGRADE.BIN.
+# Build the patched firmware from the stock V1.1.6 GP_CARDVR_UPGRADE.BIN.
 # usage: ./build.sh STOCK.BIN            -> build/GP_CARDVR_UPGRADE.BIN
 #        CANARY=1 ./build.sh STOCK.BIN   -> build-canary/GP_CARDVR_UPGRADE.BIN (docs/hooks.md)
 set -euo pipefail
@@ -12,7 +12,7 @@ canary=${CANARY:-0}
 if [ "$canary" = 1 ]; then
 	obj="$here/obj-canary"
 	outdir="$here/build-canary"
-	srcs=("$here/src/state.c" "$here/canary/canary.c" "$here/src/stubs.S")
+	srcs=("$here/src/loader.c" "$here/src/state.c" "$here/canary/canary.c" "$here/src/stubs.S")
 else
 	obj="$here/obj"
 	outdir="$here/build"
@@ -37,17 +37,20 @@ for src in "${srcs[@]}"; do
 done
 
 # ld searches INCLUDE in the -L paths and the cwd only, so point it at fw.ld.
-# GAP_END raises the top of the payload region for emulator experiments; the
-# default is the start of stock .bss.
+# GAP_END raises the top of the gap for emulator experiments; the default is
+# the start of stock .bss.
 gap_end=${GAP_END:-0xe8000}
-sed -e "s|^INCLUDE fw.ld|INCLUDE \"$here/src/fw.ld\"|" -e "s|0xe8000 - 0xe6828|$gap_end - 0xe6828|" \
+sed -e "s|^INCLUDE fw.ld|INCLUDE \"$here/src/fw.ld\"|" -e "s|0xe8000 - 0xe6968|$gap_end - 0xe6968|" \
 	"$here/src/link.ld" >"$obj/v5.ld"
 # shellcheck disable=SC2086
 arm-none-eabi-gcc -mcpu=arm926ej-s -mthumb -nostdlib \
 	-Wl,-T,"$obj/v5.ld" -Wl,-Map,"$obj/v5.map" \
 	-o "$obj/v5.elf" $objs -lgcc
-arm-none-eabi-objcopy -O binary "$obj/v5.elf" "$obj/v5.bin"
-arm-none-eabi-size "$obj/v5.elf"
+# one image per region: the gap (copied by the boot block) and the overlay body
+# (stored in the file padding, read from NOR by the loader)
+arm-none-eabi-objcopy -O binary -j .gap "$obj/v5.elf" "$obj/gap.bin"
+arm-none-eabi-objcopy -O binary -j .ovl "$obj/v5.elf" "$obj/ovl.bin"
+arm-none-eabi-size -A "$obj/v5.elf"
 # nm prints Thumb function values with bit 0 cleared; readelf keeps it, and both
 # tools/patch.py (its ARM-symbol check on stub targets) and the emulator need the
 # real state bit.
@@ -62,4 +65,4 @@ else
 	out="$outdir/GP_CARDVR_UPGRADE.BIN"
 fi
 GAP_END=$gap_end CANARY=$canary uv run -q python -I "$here/tools/patch.py" \
-	"$obj/base.bin" "$obj/v5.bin" "$obj/v5.sym" "$out"
+	"$obj/base.bin" "$obj/gap.bin" "$obj/ovl.bin" "$obj/v5.sym" "$out"

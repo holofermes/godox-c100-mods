@@ -9,8 +9,9 @@
 
 static u32 stale_at;     /* remount due, 0 = none pending */
 static u8 stale_tries;
+static u8 mount_failed;  /* the last remount got past SD init and failed in mount */
 
-/* xTaskGetTickCount; 1 tick = 1 ms (0x5bf3c converts ms*1000/1000).
+/* xTaskGetTickCount; 1 tick = 1 ms (0x5c110 converts ms*1000/1000).
  * Wraps after 49 days: compare with a signed difference, as due() does. */
 u32 v5_ms(void)
 {
@@ -22,20 +23,36 @@ static int due(u32 t)
 	return (s32)(v5_ms() - t) >= 0;
 }
 
-/* same calls and order as the stock mount 0x3d92c..0x3db48; mount drops the
- * drive's cached sectors, so what the host wrote is read fresh */
+/* One attempt of the stock mount 0x3da8c per call: fs take, SD init, fs give
+ * (0x3dac8..0x3db7c), mount (0x3db84). A failure gets stock's recovery before
+ * the next attempt: SD uninit after a failed SD init (0x3dd3c), unmount and SD
+ * uninit after a failed mount (0x3dba4..0x3dbb0), and stock then retries the
+ * mount alone (0x3dbc0) with no SD init of its own; the SD0 drive table at
+ * 0xe4978 has an init op, 0x9b570, that runs SD init. Stock waits 100 ms
+ * between attempts, the tick 5 s. mount drops the drive's cached sectors, so
+ * what the host wrote is read fresh. */
 static int remount(void)
 {
 	s32 r;
 
-	fw_fs_take();
-	r = fw_sd_init(0);
-	fw_fs_give();
-	if (r == 0)
-		r = fw_mount(DRIVE_G);
+	if (!mount_failed) {
+		fw_fs_take();
+		r = fw_sd_init(0);
+		fw_fs_give();
+		if (r) {
+			v5_log("remount sd %d", r);
+			fw_sd_uninit(0);
+			return 0;
+		}
+	}
+	r = fw_mount(DRIVE_G);
 	v5_log("remount %d", r);
-	if (r)
+	mount_failed = r != 0;
+	if (r) {
+		fw_unmount(DRIVE_G);
+		fw_sd_uninit(0);
 		return 0;
+	}
 	B_CARD_OK = 1;
 	st.card_stale = 0;
 	return 1;
@@ -75,7 +92,7 @@ static void cmd_poll(void)
 	fw_free(text);
 }
 
-/* From the 0x22238 stub in the peripheral task (4 KB stack), every ~250 ms,
+/* From the 0x22360 stub in the peripheral task (4 KB stack), every ~250 ms,
  * after the stub ran fw_seg_refresh. */
 void v5_tick(void)
 {
@@ -94,12 +111,13 @@ void v5_tick(void)
 
 	act_tick(); /* LCD, LED, late chime, drive handback */
 
-	/* The eject callback ran the SD uninit 0xb37a0, so the card is re-inited
+	/* The eject callback ran the SD uninit 0xb3844, so the card is re-inited
 	 * before anyone touches it. While the LUN still reads 0xffaa the host
 	 * sees no medium: catch up on CMD.TXT and LOG.TXT, then let act.c hand
 	 * the card back. */
 	if (st.host_released) {
 		st.host_released = 0;
+		mount_failed = 0; /* the eject's SD uninit: start from SD init */
 		if (remount()) {
 			cmd_poll();
 			log_flush();
@@ -111,6 +129,7 @@ void v5_tick(void)
 
 	if (!st.card_stale) {
 		stale_at = 0;
+		mount_failed = 0;
 	} else if (!stale_at) {
 		stale_at = (v5_ms() + STALE_WAIT) | 1;
 		stale_tries = 0;

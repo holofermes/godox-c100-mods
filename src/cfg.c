@@ -11,11 +11,12 @@ struct v5_cfg cfg = {
 	0, 0,
 };
 
-void cfg_defaults(void)
+void cfg_defaults(struct v5_cfg *c)
 {
 	static const u8 dflt[] = { 1, 1, 1, 0, USB_DRIVE, USB_WEBCAM, USB_WEBCAM, 0, 0 };
 
-	v5_memcpy(&cfg, dflt, sizeof(dflt));
+	_Static_assert(sizeof(dflt) == sizeof(struct v5_cfg), "defaults cover struct v5_cfg");
+	v5_memcpy(c, dflt, sizeof(dflt));
 }
 
 #define K_BOOL 0
@@ -37,7 +38,7 @@ static const struct {
 	{ "usb_meter", __builtin_offsetof(struct v5_cfg, usb[POS_METER]), K_USB },
 };
 
-static int set_key(const char *k, const char *v)
+static int set_key(struct v5_cfg *c, const char *k, const char *v)
 {
 	u32 i;
 
@@ -47,7 +48,7 @@ static int set_key(const char *k, const char *v)
 
 		if (!v5_streq(k, keys[i].k))
 			continue;
-		dst = (u8 *)&cfg + keys[i].off;
+		dst = (u8 *)c + keys[i].off;
 		if (keys[i].kind == K_USB) {
 			if (v5_streq(v, "drive"))
 				want = USB_DRIVE;
@@ -80,8 +81,8 @@ static char *trim(char *s)
 	return s;
 }
 
-/* key=value lines, '#' comments; text[len] must be 0, modified in place */
-void cfg_parse(char *text, u32 len)
+/* key=value lines into c, '#' comments; text[len] must be 0, modified in place */
+void cfg_parse(struct v5_cfg *c, char *text, u32 len)
 {
 	u32 i = 0;
 
@@ -102,6 +103,6 @@ void cfg_parse(char *text, u32 len)
 		*eq = 0;
 		k = trim(line);
 		v = trim(eq + 1);
-		v5_log(set_key(k, v) ? "%s=%s" : "bad %s=%s", k, v);
+		v5_log(set_key(c, k, v) ? "%s=%s" : "bad %s=%s", k, v);
 	}
 }

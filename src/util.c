@@ -13,9 +13,9 @@ void v5_memcpy(void *d, const void *s, u32 n)
 	fw_memcpy(d, s, n);
 }
 
-/* The firmware carries newlib vsnprintf (ARM thunk 0xce11c, Thumb body
- * 0xcab9c, full specifier set), the same routine its own printf uses at
- * 0x53584. */
+/* The firmware carries newlib vsnprintf (ARM thunk 0xce0f0, Thumb body
+ * 0xcac40, full specifier set), the same routine its own printf uses at
+ * 0x53758. */
 int v5_fmt(char *buf, int size, const char *fmt, ...)
 {
 	va_list ap;

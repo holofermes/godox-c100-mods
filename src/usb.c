@@ -67,8 +67,8 @@ static void usb_start(void)
 	if (want == USB_DRIVE)
 		fs_flush();
 	/* A drive init earlier in this power cycle left its callback for
-	 * SET_CONFIG (0x4ce80), which a webcam session would run: VBUS state 2,
-	 * sensor powered down, power-off at unplug. 0x4ce80 skips a NULL. */
+	 * SET_CONFIG (0x4d054), which a webcam session would run: VBUS state 2,
+	 * sensor powered down, power-off at unplug. 0x4d054 skips a NULL. */
 	else
 		W_MSDC_CB = 0;
 	if (!usb_post(msg)) {
@@ -79,7 +79,7 @@ static void usb_start(void)
 	v5_log("usb %u %s", B_MODE, name(want));
 }
 
-/* G1: VBUS state 0, insert edge. The stub goes on to 0x1f61c (state 1). */
+/* G1: VBUS state 0, insert edge. The stub goes on to 0x1f68c (state 1). */
 void v5_usb_plugin(void)
 {
 	st.usb_active = USB_NONE;
@@ -93,8 +93,8 @@ void v5_usb_plugin(void)
 	usb_start();
 }
 
-/* G2: state 1, remove edge, in place of the stock bl 0xbde60. The webcam
- * uninit turns the PHY off itself (0x3ed80). A drive gets stock's PHY off
+/* G2: state 1, remove edge, in place of the stock bl 0xbdf04. The webcam
+ * uninit turns the PHY off itself (0x3ef50). A drive gets stock's PHY off
  * only: its uninit 0x8002 would run the SD driver uninit under the camera's
  * FS. */
 void v5_usb_unplug(void)
@@ -119,29 +119,26 @@ void v5_usb_tick(void)
 		return;
 	if (B_USB_STATE != 1 || bus_busy())
 		return;
-	/* restart the charger count as 0x1f61c does after a stock post, so a
+	/* restart the charger count as 0x1f68c does after a stock post, so a
 	 * drive post with no host still gets 0x6005 arg 1 (keys back) */
 	W_USB_CHG_CNT = 0;
 	usb_start();
 }
 
-/* G6: USB task, called from 0x4e740 on START STOP UNIT with LoEj after LUN 0
- * status was set to 0xffaa. Flag only; card work belongs to the tick. */
+/* G6: USB task, from blx r2 at 0x4e914 on START STOP UNIT with LoEj after LUN 0
+ * status was set to 0xffaa, through eject_stub, which comes here only armed
+ * and runs the stock callback alone otherwise. Flag only; card work belongs
+ * to the tick. */
 u32 v5_eject_cb(u32 lun)
 {
-	/* the stubs.S arm test */
-	u8 armed = st.booted && B_UPD_CHECKED == 1;
 	u32 r;
 
 	/* fs_ready() is 0 from before the SD uninit until the tick remounts */
-	if (armed)
-		st.ejecting = 1;
+	st.ejecting = 1;
 	r = fw_stock_eject_cb(lun);
-	if (armed) {
-		st.host_released = 1;
-		__asm__ volatile("" ::: "memory");
-		st.ejecting = 0;
-	}
+	st.host_released = 1;
+	__asm__ volatile("" ::: "memory");
+	st.ejecting = 0;
 	return r;
 }
 

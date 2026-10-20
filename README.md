@@ -2,15 +2,17 @@
 
 <p align="center"><img src="docs/c100.jpg" alt="Godox C100" width="420"></p>
 
-Patches for the firmware of the Godox C100 card camera (V1.1.3). All the new code lives in the
-6 KB of RAM the stock firmware leaves unused; the rest is a few dozen bytes changed in place.
-The build starts from Godox's own update file.
+Patches for the firmware of the Godox C100 card camera (V1.1.6). The code that runs at boot lives
+in the 5.6 KB of RAM the stock firmware leaves unused; the features are stored in unused space
+in the update file and loaded from the camera's flash into 64 KB taken from the heap. The rest is
+a few dozen bytes changed in place. The build starts from Godox's own update file.
 
 Unofficial. A bad flash can brick the camera; read [Recovery](#recovery) first.
 
 ## What it does
 
-Tested on a C100:
+Tested on a C100 with the earlier build of this patch for firmware V1.1.3. The V1.1.6 build is
+not yet tested on the camera.
 
 - USB webcam, MJPEG 1920x1080 from the full sensor, ~27 fps.
 - USB mode per switch position: Photo = USB drive, Video and Metering = webcam.
@@ -33,15 +35,18 @@ skip to [Flash](#flash). Or build it:
 
 ## Build
 
-Needs the stock firmware (`Godox_Firmware_C100_V1.1.3.zip` from godox.com, product page,
-Download tab), `arm-none-eabi-gcc` and [uv](https://docs.astral.sh/uv/).
+Needs the stock firmware V1.1.6
+([Godox_C100_V1.1.6.zip](https://www.godox.com/Downloads/Godox_C100_V1.1.6.zip), linked from the
+C100 product page on godox.com; sha256 `3fc9b15c…`), `arm-none-eabi-gcc` and
+[uv](https://docs.astral.sh/uv/). The update file is `c100_v1.1.6_20260929/GP_CARDVR_UPGRADE.BIN`
+in the zip.
 
     ./build.sh path/to/GP_CARDVR_UPGRADE.BIN
 
-Output: `build/GP_CARDVR_UPGRADE.BIN`. The script refuses anything but the stock V1.1.3 file
-(sha256 `f86b8c1c…`). With arm-none-eabi-gcc 14.2.1 the output's sha256 is
-`0087ff9ae8ef458b8107ac94c3bc82a6f98dec7f9ce0a1abf9be6577293246bd`, the image tested on the
-camera; other compiler versions give other bytes.
+Output: `build/GP_CARDVR_UPGRADE.BIN`. The script refuses anything but the stock V1.1.6 file
+(sha256 `411a553f…`). With arm-none-eabi-gcc 14.2.1 the output's sha256 is
+`03023f67a448eb3ff6890e006c6a352727d509e806816cd6d5e98b8a74dc9b58`. This image is not yet
+tested on the camera; other compiler versions give other bytes.
 
 Emulator tests: `uv run --group test python tests/test_v5.py build/GP_CARDVR_UPGRADE.BIN obj/v5.sym`
 
@@ -51,13 +56,17 @@ Emulator tests: `uv run --group test python tests/test_v5.py build/GP_CARDVR_UPG
 
 1. Charge the battery.
 2. Copy `build/GP_CARDVR_UPGRADE.BIN` to the root of the microSD card.
-3. With no USB cable, switch to Photo. The LED blinks for 10-15 s, the camera deletes the file
-   and restarts by itself. The clock resets.
+3. Card in the camera, no USB cable, switch to Photo. The LED blinks for 10-15 s, the camera
+   deletes the file and restarts by itself. The clock resets. Only the first card mount after
+   power-on can flash: if nothing happens, switch off and on again with the card in.
 
 ## Recovery
 
-Flash the stock `GP_CARDVR_UPGRADE.BIN` the same way. The card updater is part of the
-firmware's app and runs on the first card mount after power-on. Details in `docs/firmware.md`.
+Flash the stock V1.1.6 `GP_CARDVR_UPGRADE.BIN` the same way. The card updater is part of the
+firmware's app and runs on the first card mount after power-on. If the patch's features fail to
+load, the camera runs without them (webcam on USB, no auto power-off on USB power, no power-on
+chime), the updater works as usual and `LOG.TXT` gets a line `ovl err N`; that path is checked in
+the emulator, not on a camera. Details in `docs/firmware.md` and `docs/hooks.md`.
 
 ## C100.TXT
 
@@ -121,7 +130,7 @@ The camera enumerates only when the cable goes into a camera that is already on.
 
 - `docs/hardware.md`: board, screen, LED, buttons, pins
 - `docs/firmware.md`: image layout, boot, card updater, recovery limits
-- `docs/hooks.md`: how the patch works, the hook table, the tests
+- `docs/hooks.md`: how the patch works, the overlay, the hook table, the tests
 - `docs/usb.md`: USB modes and the states behind them
 - `docs/webcam.md`: 1080p, the left/right freeze, the record-stop power-off, 720p
 

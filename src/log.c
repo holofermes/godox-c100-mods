@@ -72,7 +72,7 @@ void log_grow(char *buf, u32 newsize)
 	v5_irq_restore(c);
 }
 
-/* Every stock printf line, from the 0x535e0 stub, any task, once armed:
+/* Every stock printf line, from the 0x537b4 stub, any task, once armed:
  * lines printed before C100.TXT is read go to the UART only. IRQs stay masked
  * for the whole copy because PRINT_BUF has no lock and another task's printf
  * would rewrite it under us. Nothing in the masked copy prints, so it cannot

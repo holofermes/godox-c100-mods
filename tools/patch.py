@@ -1,6 +1,7 @@
-# Base image (tools/base.py) + C payload in the RAM gap 0xe6828..0xe8000 + the hooks
-# below. build.sh runs this; docs/hooks.md explains the design.
-# usage: patch.py BASE.BIN V5.BIN V5.SYM OUT
+# Base image (tools/base.py) + the boot-time layer in the RAM gap 0xe6968..0xe8000 + the
+# feature overlay in the file padding + the hooks below. build.sh runs this;
+# docs/hooks.md explains the design.
+# usage: patch.py BASE.BIN GAP.BIN OVL.BIN V5.SYM OUT
 #
 # Every hook states and asserts its original bytes, so an unexpected base image
 # fails the build.
@@ -9,37 +10,64 @@ import itertools
 import os
 import struct
 import sys
+import zlib
 
-base, binf, symf, dst = sys.argv[1:5]
+base, gapf, ovlf, symf, dst = sys.argv[1:6]
 B = 0x10200  # file = RAM + B
 SIZE = 1841152
-GAP, GAP_END = 0xE6828, int(os.environ.get("GAP_END", "0xe8000"), 0)
+GAP, GAP_END = 0xE6968, int(os.environ.get("GAP_END", "0xe8000"), 0)
 LOADLEN = 0x1002E  # u32 LE sector count: boot copies (N-1)*512 bytes to RAM 0
 # The boot loader copies (N-1)*512 B with no check, but crt0 then zeroes
-# 0xe8000..0x202a70, so a payload above 0xe8000 is destroyed before any hook
-# runs. 0x741 is the real ceiling (docs/hooks.md); anything higher
-# is a link-and-emulate-only build, never flashable.
+# 0xe8000..0x202a70, so anything above 0xe8000 is destroyed before any hook
+# runs. 0x741 copies exactly up to 0xe8000 (docs/hooks.md); both the release
+# and the canary ship it. Anything higher is a link-and-emulate-only build,
+# never flashable.
 TEST_ONLY = GAP_END > 0xE8000
-LOADLEN_MAX = 0x100000 if TEST_ONLY else 0x741
-# The card updater opens this name and takes 1,836,000..1,846,000 B (0x252b0).
+LOADLEN_SHIP = 0x741
+# The card updater opens this name and takes 1,836,000..1,846,000 B (0x253c8).
 # A test-only build must not carry the name, and is padded with 0xFF to 2 MiB
 # so the updater refuses it before it reads or erases anything, even renamed.
 FW_NAME = "GP_CARDVR_UPGRADE.BIN"
 TEST_PAD = 0x200000
-BASE_SHA = "d078d5b0feaa29f72c213e038aeade61a261d9c78ce6982d96c5ed2453481977"  # tools/base.py
+BASE_SHA = "bfe8a65b49b258bcd2f7ba2886cb97b5c1858e5c3bc1f15038ac2730039056a7"  # tools/base.py
+
+# Overlay (src/loader.c, src/link.ld). The updater writes the file to NOR byte for
+# byte, so the file offset is the NOR offset the loader reads.
+OVL_FILE = 0x100000  # loader.c OVL_FLASH; 64 KiB erase block 16, the app ends in block 15
+OVL_MAGIC = 0x4C564F43  # loader.c OVL_MAGIC, "COVL"
+OVL_RAM, OVL_TOP = 0xFF0000, 0x1000000  # header, then the body from 0xff0010
+HDR = 0x10
+PAGE = 0x100  # the loader reads whole 256 B pages
+APP_END_FILE = 0xE6968 + B  # end of stock .data (.data start + size: crt0 literals at RAM 0x150 and 0x158)
+RES_FILE = 0x170000  # resource directory
+# FreeRTOS heap: main 0x5f290 defines one region from 0x24aac0 with size [0x5f46c] -
+# 0x208ac0, so it ends at [0x5f46c] + 0x42000. Lowering the literal by 64 KB keeps
+# 0xff0000..0x1000000 out of the heap for the overlay.
+HEAP_LIT_RAM, HEAP_LIT_OLD = 0x5F46C, 0x00FBDFFF
+HEAP_LIT_NEW = HEAP_LIT_OLD - (OVL_TOP - OVL_RAM)
+assert HEAP_LIT_NEW + 0x42000 + 1 == OVL_RAM, hex(HEAP_LIT_NEW)
 
 d = bytearray(open(base, "rb").read())
 assert len(d) == SIZE, len(d)
 assert hashlib.sha256(d).hexdigest() == BASE_SHA, "not the base image from tools/base.py"
 
-code = open(binf, "rb").read()
+gap = open(gapf, "rb").read()
+ovl = open(ovlf, "rb").read()
 sym = {}
 for line in open(symf):
     a, _, name = line.split()
     sym[name] = int(a, 16)
-end = sym["__v5_end"]
-assert GAP <= end <= GAP_END, (hex(end), hex(GAP_END))
-assert len(code) <= end - GAP, (len(code), hex(end - GAP))
+veneers = [n for n in sym if "veneer" in n or n.endswith(("_from_arm", "_from_thumb"))]
+assert not veneers, f"linker veneers {veneers}: a call between gap and overlay is not long_call (v5.h CROSS)"
+
+g0, g1 = sym["__gap_start"], sym["__gap_end"]
+assert g0 == GAP and g1 <= GAP_END, (hex(g0), hex(g1), hex(GAP_END))
+assert len(gap) == g1 - g0, (len(gap), hex(g1 - g0))
+o0, o1, oend = sym["__ovl_start"], sym["__ovl_load_end"], sym["__ovl_end"]
+assert sym["__ovl_base"] == OVL_RAM and o0 == OVL_RAM + HDR, (hex(sym["__ovl_base"]), hex(o0))
+assert len(ovl) == o1 - o0, (len(ovl), hex(o1 - o0))
+ovl_read = (HDR + len(ovl) + PAGE - 1) // PAGE * PAGE  # bytes the loader reads, from 0xff0000
+assert oend <= OVL_TOP and OVL_RAM + ovl_read <= OVL_TOP, (hex(oend), hex(ovl_read))
 
 
 def branch(at, target, orig, link=False, always=False):
@@ -61,64 +89,72 @@ def bl(at, target, orig):
 #       bl     ARM BL to a stub, condition of the original kept
 # (RAM, original, kind, stub, why)
 HOOKS = [
-    (0x535E0, "0000d4e5", "b", "logcap_stub", "printf: capture the formatted line at r4"),
-    (0x37DF4, "58d08de2", "b", "settings_stub", "mount epilogue: read C100.TXT"),
-    (0x22238, "04fcffeb", "bl", "tick_stub", "peripheral tick: seg_refresh, then v5_tick"),
-    (0x1F540, "5f00a0e3", "b", "plug_stub", "VBUS insert: pick the personality"),
-    (0x1F4C0, "667a02eb", "bl", "unplug_stub", "VBUS remove: tear the personality down"),
-    (0x22138, "8500000a", "bal", "usb_poll_gate_stub", "tick: stock poll gate until armed, every tick after"),
-    (0x22354, "02f4ffeb", "bl", "usb_tick_stub", "VBUS poll, then v5_usb_tick"),
+    (0x537B4, "0000d4e5", "b", "logcap_stub", "printf: capture the formatted line at r4"),
+    (0x37FA0, "58d08de2", "b", "settings_stub", "mount epilogue: load the overlay, read C100.TXT"),
+    (0x22360, "ecfbffeb", "bl", "tick_stub", "peripheral tick: seg_refresh, then v5_tick"),
+    (0x1F5B0, "5f00a0e3", "b", "plug_stub", "VBUS insert: pick the personality"),
+    (0x1F530, "737a02eb", "bl", "unplug_stub", "VBUS remove: tear the personality down"),
+    (0x22260, "8500000a", "bal", "usb_poll_gate_stub", "tick: stock poll gate until armed, every tick after"),
+    (0x2247C, "d4f3ffeb", "bl", "usb_tick_stub", "VBUS poll, then v5_usb_tick"),
     (0x1DDA4, "0300008a", "b", "long_select_stub", "Select held: bhi kept, long press"),
-    (0x43224, "0036a0e1", "b", "v5_gpio_set", "gpio_set entry: LED gate on 43/95"),
-    (0x1F544, "278f00eb", "bl", "v5_get95", "USB busy read of GPIO 95"),
-    (0x1F5EC, "fd8e00eb", "bl", "v5_get95", "USB busy read of GPIO 95, state 3"),
-    (0x22958, "f0402de9", "b", "v5_sound_gate", "play_effect entry: sound gate"),
+    (0x433F4, "0036a0e1", "b", "v5_gpio_set", "gpio_set entry: LED gate on 43/95"),
+    (0x1F5B4, "7f8f00eb", "bl", "v5_get95", "USB busy read of GPIO 95"),
+    (0x1F65C, "558f00eb", "bl", "v5_get95", "USB busy read of GPIO 95, state 3"),
+    (0x22A80, "f0402de9", "b", "v5_sound_gate", "play_effect entry: sound gate"),
 ]
 
 # Webcam gates (src/v6.S, docs/webcam.md). Neither runs at boot: the aspect gate runs on a
 # left/right press, the record gate on a record start. Not in the canary.
 V6_HOOKS = [
-    (0x2EA90, "20caffeb", "bl", "v6_aspect_gate", "photo left/right: aspect step, gated while streaming"),
-    (0x36F4C, "f1a8ffeb", "bl", "v6_aspect_gate", "video left/right: aspect step, gated while streaming"),
-    (0x36F7C, "e5a8ffeb", "bl", "v6_aspect_gate", "video left/right: aspect step, gated while streaming"),
-    (0x356E0, "5c00000a", "b", "v6_rec_gate", "record start: beq kept, gated while streaming"),
+    (0x2EC48, "e4c9ffeb", "bl", "v6_aspect_gate", "photo left/right: aspect step, gated while streaming"),
+    (0x37104, "b5a8ffeb", "bl", "v6_aspect_gate", "video left/right: aspect step, gated while streaming"),
+    (0x37134, "a9a8ffeb", "bl", "v6_aspect_gate", "video left/right: aspect step, gated while streaming"),
+    (0x35898, "5c00000a", "b", "v6_rec_gate", "record start: beq kept, gated while streaming"),
 ]
 # 1080p webcam: frame descriptor 1920x1080, and APMode 0x106's target 1920x1080
 # (full sensor, no crop). [0xf894] is a stock literal 0x438; 1080 has no ARM immediate.
 # For 720p (1280x720 centre crop): delete these four rows and the four "V6D" rows of
 # HOOKMAP in tests/test_v5.py, then run build.sh.
 V6_DATA = [
-    (0xF3B0A, "0005d002", "80073804", "UVC frame 1: 1280x720 -> 1920x1080"),
-    (0xF3B16, "00201c00", "00483f00", "UVC frame 1: dwMaxVideoFrameBufferSize 1920*1080*2"),
+    (0xF3C56, "0005d002", "80073804", "UVC frame 1: 1280x720 -> 1920x1080"),
+    (0xF3C62, "00201c00", "00483f00", "UVC frame 1: dwMaxVideoFrameBufferSize 1920*1080*2"),
     (0x1F2E4, "2d2ea0e3", "a8279fe5", "0x106 target height: mov r2,#0x2d0 -> ldr r2,[pc,#0x7a8] (=0x438)"),
     (0x1F2F0, "053ca0e3", "783ea0e3", "0x106 target width: mov r3,#0x500 -> mov r3,#0x780"),
 ]
 
-# CANARY=1 (docs/hooks.md): same boot-time hooks and stubs, payload from canary/canary.c.
-# The canary leaves the unplug pool word (G4) as in the base image; it only matters
-# after a mount.
+# CANARY=1 (docs/hooks.md): same boot-time hooks, stubs, loader and heap reservation, the
+# overlay from canary/canary.c. The canary leaves the unplug pool word (G4) as in the base
+# image; it only matters after a mount.
 CANARY = os.environ.get("CANARY") == "1"
 
 # Pool words and data patches, by file offset. The peripheral task stack goes to
 # 4 KB (docs/hooks.md); it is used at boot before the updater, proven by the canary.
-G4 = (0x36664, "05800000", "02800000", "unplug pool: 0x8005 back to 0x8002, the payload posts the uninit")
-STACK4K = (0xEAAFC, "00080000", "00100000", "peripheral task stack 0x800 -> 0x1000 B (InitTask def 0xda8ec)")
-DATA = [STACK4K] if CANARY else [G4, STACK4K, *V6_DATA]
+G4 = (0x3680C, "05800000", "02800000", "unplug pool: 0x8005 back to 0x8002, the patch posts the uninit")
+STACK4K = (0xEAC2C, "00080000", "00100000", "peripheral task stack 0x800 -> 0x1000 B (InitTask def 0xdaa1c)")
+HEAP = (
+    HEAP_LIT_RAM + B,
+    struct.pack("<I", HEAP_LIT_OLD).hex(),
+    struct.pack("<I", HEAP_LIT_NEW).hex(),
+    f"heap-size literal {HEAP_LIT_OLD:#x} -> {HEAP_LIT_NEW:#x}: heap region ends at {HEAP_LIT_NEW + 0x42000:#x}",
+)
+DATA = [STACK4K, HEAP] if CANARY else [G4, STACK4K, HEAP, *V6_DATA]
 if not CANARY:
     HOOKS += V6_HOOKS
 
-# The MSC eject callback: stock reaches it with blx r2 at 0x4e740, so a Thumb
-# target needs bit 0 set.
-WORD_HOOKS = [(0xE0848, "30e20b00", "v5_eject_cb", True, "LUN+0x40 eject callback: note the handback")]
+# The MSC eject callback word (SD LUN ops +0x30): stock reaches it with blx r2 at
+# 0x4e914. eject_stub is ARM, so bit 0 stays clear.
+WORD_HOOKS = [
+    (0xE0978, "d4e20b00", "eject_stub", False, "SD LUN ops +0x30 eject callback: gate, then note the handback")
+]
 
 # G7, the auto-off variant covering VBUS states 1 and 2. Disassembled in the image:
-# cmp r0,#0 / movne fp,#0 / strne fp,[r8] / bne 0x22268, so the counter is held while
+# cmp r0,#0 / movne fp,#0 / strne fp,[r8] / bne 0x22390, so the counter is held while
 # the state is 1 or 2.
 BYTE_HOOKS = [
-    (0x32158, "01", "00", "auto-off: cmp r0,#1 -> cmp r0,#0"),
-    (0x3215F, "03", "13", "auto-off: moveq -> movne"),
-    (0x32163, "05", "15", "auto-off: strne, covering states 1 and 2"),
-    (0x32167, "0A", "1A", "auto-off: bne 0x22268"),
+    (0x32280, "01", "00", "auto-off: cmp r0,#1 -> cmp r0,#0"),
+    (0x32287, "03", "13", "auto-off: moveq -> movne"),
+    (0x3228B, "05", "15", "auto-off: strne, covering states 1 and 2"),
+    (0x3228F, "0A", "1A", "auto-off: bne 0x22390"),
 ]
 
 for at, old, kind, val, why in HOOKS:
@@ -128,7 +164,7 @@ for at, old, kind, val, why in HOOKS:
     assert kind in ("b", "bal", "bl"), kind
     t = sym[val]
     assert t % 2 == 0, f"{val} is not an ARM symbol"
-    assert GAP <= t < GAP_END, (val, hex(t))
+    assert GAP <= t < g1, (val, hex(t))
     o = struct.unpack("<I", old)[0]
     new = bl(at, t, o) if kind == "bl" else branch(at, t, o, always=kind == "bal")
     assert len(new) == len(old)
@@ -140,9 +176,8 @@ for at, old, name, thumb, why in WORD_HOOKS:
     off = at + B
     assert d[off : off + len(old)] == old, (hex(at), d[off : off + len(old)].hex(), old.hex())
     t = sym[name]
-    if thumb:
-        t |= 1
-    assert GAP <= (t & ~1) < GAP_END, (name, hex(t))
+    assert (t & 1) == thumb, f"{name}: state bit {t & 1}, want {int(thumb)}"
+    assert GAP <= (t & ~1) < g1, (name, hex(t))
     new = struct.pack("<I", t)
     d[off : off + len(new)] = new
     print(f"RAM {at:#07x} file {off:#08x}: {old.hex()} -> {new.hex()}  {why} ({name})")
@@ -158,24 +193,44 @@ for off, old, new, why in BYTE_HOOKS:
     d[off] = int(new, 16)
     print(f"file {off:#08x}: {old} -> {new}  {why}")
 
-# code into the gap; the gap must still be the stock zero padding
+# boot-time layer into the gap; the gap must still be the stock zero padding
 f0 = GAP + B
+assert f0 == APP_END_FILE
 assert set(d[f0 : GAP_END + B]) == {0}
-d[f0 : f0 + len(code)] = code
+d[f0 : f0 + len(gap)] = gap
 
-# load length must cover code, data and bss
+# the overlay this gap belongs to (loader.c ovl_expect): body length and CRC-32, over the
+# placeholder, so the loader refuses any other build's overlay
+crc = zlib.crc32(ovl)
+xa = sym["ovl_expect"]
+assert g0 <= xa and xa + 8 <= g1 and xa % 4 == 0, hex(xa)
+assert d[xa + B : xa + B + 8] == b"\xff" * 8, d[xa + B : xa + B + 8].hex()
+d[xa + B : xa + B + 8] = struct.pack("<2I", len(ovl), crc)
+print(f"RAM {xa:#07x} file {xa + B:#08x}: ovl_expect = length {len(ovl)}, crc32 {crc:08x}")
+
+# overlay into the file padding: past the boot copy, before the resources, still zero
+boot_copy_end = (LOADLEN_SHIP - 1) * 0x200 + B
+of0, of1 = OVL_FILE, OVL_FILE + ovl_read
+assert boot_copy_end <= of0 and of1 <= RES_FILE, (hex(of0), hex(of1))
+assert set(d[of0:of1]) == {0}, "overlay area is not the stock zero padding"
+hdr = struct.pack("<4I", OVL_MAGIC, len(ovl), crc, 0)
+d[of0 : of0 + HDR + len(ovl)] = hdr + ovl
+
+# load length: the whole gap, the copy the canary proves
 old_len = struct.unpack_from("<I", d, LOADLEN)[0]
 assert old_len == 0x736, hex(old_len)
-new_len = (end + 0x200 + 0x1FF) // 0x200
-if CANARY:
-    # the canary proves the boot loader copy the release ships with: the whole gap
-    new_len = max(new_len, 0x741)
-assert new_len <= LOADLEN_MAX, (hex(new_len), hex(LOADLEN_MAX))
+new_len = LOADLEN_SHIP if not TEST_ONLY else max(LOADLEN_SHIP, (g1 + 0x200 + 0x1FF) // 0x200)
+assert (new_len - 1) * 0x200 >= g1, hex(new_len)
+assert TEST_ONLY or new_len == LOADLEN_SHIP
 struct.pack_into("<I", d, LOADLEN, new_len)
 print(f"load length {old_len:#x} -> {new_len:#x} sectors, RAM 0..{new_len * 0x200 - 0x200:#x}")
-print(f"payload code+data {len(code)} B, end {end:#x}, gap left {GAP_END - end} B")
+print(f"gap: {len(gap)} of {GAP_END - GAP} B used ({g0:#x}..{g1:#x}), {GAP_END - g1} B left")
+print(
+    f"overlay: {len(ovl)} B body + {oend - o1} B bss at {o0:#x}..{oend:#x}, {OVL_TOP - oend} B of the "
+    f"{OVL_TOP - OVL_RAM} B reservation left; file {of0:#x}..{of0 + HDR + len(ovl):#x}, crc32 {crc:08x}"
+)
 
-# no hook may land inside the payload, and no two hooks may overlap
+# no hook may land inside the gap or the overlay, and no two hooks may overlap
 regions = [(a + B, a + B + 4) for a, *_ in HOOKS]
 regions += [(a + B, a + B + 4) for a, _, _, _, _ in WORD_HOOKS]
 regions += [(o, o + 4) for o, _, _, _ in DATA]
@@ -184,7 +239,8 @@ regions.sort()
 for (a0, a1), (b0, _) in itertools.pairwise(regions):
     assert a1 <= b0, (hex(a0), hex(b0))
 for a0, a1 in regions:
-    assert a1 <= f0 or a0 >= f0 + len(code), hex(a0)
+    assert a1 <= f0 or a0 >= f0 + len(gap), hex(a0)
+    assert a1 <= of0 or a0 >= of1, hex(a0)
 
 assert len(d) == SIZE
 if TEST_ONLY:
@@ -195,6 +251,7 @@ print(dst, len(d), hashlib.sha256(d).hexdigest())
 if TEST_ONLY:
     marker = os.path.join(os.path.dirname(dst), "DO-NOT-FLASH")
     open(marker, "w").write(
-        f"payload end {end:#x} is above 0xe8000: crt0 zeroes it at boot\nemulator only, the camera would not boot\n"
+        f"gap limit {GAP_END:#x} is above 0xe8000: crt0 zeroes what is linked past it at boot\n"
+        "emulator only, the camera would not boot\n"
     )
     print("*** " + marker + ": THIS IMAGE IS NOT FLASHABLE, emulator only ***")
