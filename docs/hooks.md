@@ -14,8 +14,9 @@ The stock image leaves 5,784 B of RAM unused, too little for all of it. So the c
   (docs/firmware.md). The boot block copies it from the image with the rest of the app once
   `tools/patch.py` raises the load length at file 0x1002E from 0x736 to 0x741; crt0 never touches
   it. It holds only what runs before the features are switched on: the ARM entry stubs
-  (`src/stubs.S`), the webcam fixes (`src/v6.S`), the overlay loader and the state the stubs read
-  (`src/loader.c`). About 1.3 KB of it is used.
+  (`src/stubs.S`), the overlay loader and the state the stubs read (`src/loader.c`), and, linked
+  last, the webcam fixes and the webcam's config descriptor (`src/v6.S`). About 2 KB of it is
+  used.
 - **Overlay**, RAM 0xFF0000..0x1000000, the top 64 KB of the 16 MiB of RAM. Stock gives this to
   the FreeRTOS heap; the patch lowers the heap-size literal at 0x5f46c from 0xFBDFFF to 0xFADFFF,
   so the heap ends at 0xFEFF80 instead of 0xFFFF80; no stock code or data refers to the range
@@ -51,7 +52,8 @@ if no load has worked yet, it loads the overlay:
 7. Call the overlay's `load_settings`.
 
 On the camera the overlay loads on every boot; with `log=on` each boot logs
-`[v5] v5 1348+5220 B, C100.TXT ok`, the bytes used in the gap and in the overlay [seen].
+`[v5] v5 G+O B, C100.TXT ok`, the bytes used in the gap and in the overlay (1348+5220 on the
+03023f67 build) [seen].
 
 Any failure (reader not up, a page read error, wrong magic, another build's length or CRC, a
 body that does not match its CRC) returns before step 7 and appends `ovl err N` to `LOG.TXT`,
@@ -96,7 +98,8 @@ after that to the overlay's `v5_eject_cb`.
 ## Hooks
 
 Ids: D the display-refresh tick, G USB and VBUS, K keys, L the LED pins, S sound, V6 the webcam
-fixes and 1080p data; LOG, SET, STACK and HEAP are named for what they patch. There is no G5.
+fixes, sizes and descriptor; LOG, SET, STACK and HEAP are named for what they patch. There is no
+G5.
 
 | id | RAM | stock | replaced by | runs |
 | --- | --- | --- | --- | --- |
@@ -117,7 +120,11 @@ fixes and 1080p data; LOG, SET, STACK and HEAP are named for what they patch. Th
 | HEAP | 0x5f46c | heap-size literal 0xFBDFFF | 0xFADFFF: keeps 0xFF0000..0x1000000 for the overlay | boot, in main |
 | V6A | 0x2ec48, 0x37104, 0x37134 | `bl 0x213e0` aspect step | `v6_aspect_gate` (docs/webcam.md) | key press |
 | V6R | 0x35898 | `beq` record start | `v6_rec_gate` | record start |
-| V6D | 0xf0e4, 0xf0f0, file 0xf3c56, 0xf3c62 | webcam size | 1920x1080 | stream start |
+| V6D | 0xf0e4, 0xf0f0 | APMode 0x106 target 1280x720 | 1920x1080 | stream start |
+| V6S | 0xf510 | 0x106 second path = target | `v6_size`: the host's frame size, zoom 100 | stream start |
+| V6S | 0xf514, 0xf4e0, 0xf4e4 | second ldrh; 0x106 display = path 0 | nop; display = second path | stream start |
+| V6P | 0x527d4, 0x527d8 | probe: bFrameIndex 1 only | 0..6 | host SET_CUR |
+| V6C | pools 0x3ef00, 0x52488 | config descriptor 0xe39d0 | `v6_cfg`, `v6_cfg` + 0xbe (docs/webcam.md) | webcam plug-in |
 
 The peripheral task stack goes to 4 KB because the patch's card writes run in that task and a
 static bound with stock FAT and SD frames comes to at most 3.1 KB, on SD error paths. The stack
@@ -134,19 +141,20 @@ their on/off check, the stack size, the heap literal, the loader) and replaces t
 function: on each mount it appends `canary 2 ovl <crc> chime <n>` to `LOG.TXT`, where `<crc>` is
 the overlay CRC the loader checked (build.sh prints it) and `<n>` is the sound id the sound hook
 caught (2 when it caught the startup chime). It never switches the features on. It leaves out the
-webcam fixes (`src/v6.S`), the 1080p data and G4.
+webcam fixes and descriptor (`src/v6.S`, the V6 rows) and G4.
 
 The full build's gap matches the canary's 321 words of stubs, loader, literal pools and loader data
 except 14 words: 12 literal words, each the address of something in the overlay (the C entry
 points, `led`, the overlay's bounds and entry), and the two words of the overlay's length and CRC.
 Every gap symbol, `st` included, is at the same address. So a canary run on the camera covers the
 stub and loader code the full build ships, the heap reservation, the flash read, the cache
-maintenance and the call into the overlay. It does not cover `src/v6.S`: the webcam fixes run on
-left/right and record start without waiting for the features to switch on, so they can run before
-the first mount; they read only the stock word 0x123d3c and branch to stock code, and were checked
-in the emulator and the disassembly only. Redo the canary after any change to `src/stubs.S`,
-`src/loader.c`, the load length, the stack size or the heap literal. Check changes to `src/v6.S` in
-the emulator.
+maintenance and the call into the overlay. It does not cover `src/v6.S`, which is linked after all
+of that, so it moves nothing the canary proved. The webcam fixes run on left/right, record start
+and stream start without waiting for the features to switch on, so they can run before the first
+mount; they read only stock bytes (0x123d3c, 0xe3b2f), `v6_size` writes only the zoom bytes, and
+they branch to stock code. They were checked in the emulator and the disassembly only. Redo the
+canary after any change to `src/stubs.S`, `src/loader.c`, the load length, the stack size or the
+heap literal. Check changes to `src/v6.S` in the emulator.
 
 The canary was flashed on a camera, booted and logged, flashed stock from itself, then was
 flashed again from stock [seen].
@@ -160,8 +168,10 @@ stock's own heap code, the loader's success path (pages read, header, CRC, .bss 
 clean over the overlay, the I-cache invalidate, then the entry), that a failed flash read,
 reader not up, bad magic, bad length, bad CRC or a self-consistent overlay from another build
 each leave the features off, run no overlay code and log `ovl err N`, and that a mount during an
-update loads nothing. 430 checks for the full build, 144 for the canary. They do not model the
-scheduler, IRQs, the MMU and caches (the cache instructions run as no-ops; the calls are
+update loads nothing. For the webcam: the descriptor walk and the stock USB code that serves it,
+the probe per frame index, the APMode 0x106 geometry per index, and CMD.TXT `webcam` from the
+command to the boot after. 629 checks for the full build, 144 for the canary. They do not model
+the scheduler, IRQs, the MMU and caches (the cache instructions run as no-ops; the calls are
 checked), real SD, flash or USB behaviour, or failures of malloc, read, write or the RTC.
 
     uv run --group test python tests/test_v5.py build/GP_CARDVR_UPGRADE.BIN obj/v5.sym

@@ -53,6 +53,8 @@ from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UcError
 from unicorn.arm_const import (
     UC_ARM_REG_CPSR,
     UC_ARM_REG_R0,
+    UC_ARM_REG_R1,
+    UC_ARM_REG_R2,
     UC_ARM_REG_R3,
     UC_ARM_REG_R4,
     UC_ARM_REG_R5,
@@ -61,6 +63,7 @@ from unicorn.arm_const import (
     UC_ARM_REG_R8,
     UC_ARM_REG_R9,
     UC_ARM_REG_R10,
+    UC_ARM_REG_R12,
     UC_ARM_REG_SP,
 )
 
@@ -106,10 +109,16 @@ HOOKMAP = [
     ("V6A", 0x37104, "b5a8ffeb", "bl", "v6_aspect_gate"),
     ("V6A", 0x37134, "a9a8ffeb", "bl", "v6_aspect_gate"),
     ("V6R", 0x35898, "5c00000a", "b", "v6_rec_gate"),
-    ("V6D", 0xF3C56 - B, "0005d002", "bytes", "80073804"),
-    ("V6D", 0xF3C62 - B, "00201c00", "bytes", "00483f00"),
     ("V6D", 0x1F2E4 - B, "2d2ea0e3", "bytes", "a8279fe5"),
     ("V6D", 0x1F2F0 - B, "053ca0e3", "bytes", "783ea0e3"),
+    ("V6S", 0xF510, "be00d4e1", "bl", "v6_size"),
+    ("V6S", 0x1F6E0 - B, "b610d4e1", "bytes", "ba11d4e1"),
+    ("V6S", 0x1F6E4 - B, "b820d4e1", "bytes", "bc21d4e1"),
+    ("V6S", 0x1F714 - B, "b031d4e1", "bytes", "0000a0e1"),
+    ("V6P", 0x629D4 - B, "010053e3", "bytes", "060053e3"),
+    ("V6P", 0x629D8 - B, "a6ffff1a", "bytes", "a6ffff8a"),
+    ("V6C", 0x3EF00, "d0390e00", "word", "v6_cfg"),
+    ("V6C", 0x52488, "d0390e00", "word", "v6_cfg+0xbe"),
 ]
 LOADLEN, LOADLEN_SHIP = 0x1002E, 0x741
 SIZE, TEST_PAD = 1841152, 0x200000  # tools/patch.py: a test-only build is padded with 0xFF
@@ -209,8 +218,10 @@ def t_image(h):
         if kind == "bytes":
             h.eq(got.hex(), val, f"{hid} {at:#x}: {orig} -> {val}")
         elif kind == "word":
-            h.ok(S[val] % 2 == 0, f"{hid} {at:#x}: {val} is ARM code")
-            h.eq(struct.unpack("<I", got)[0], S[val], f"{hid} {at:#x}: word = {val}")
+            name, _, add = val.partition("+")
+            want = S[name] + int(add or "0", 0)
+            h.ok(want % 2 == 0, f"{hid} {at:#x}: {val} is ARM code or word data")
+            h.eq(struct.unpack("<I", got)[0], want, f"{hid} {at:#x}: word = {val}")
         else:
             w, ow = struct.unpack("<I", got)[0], struct.unpack("<I", o)[0]
             is_br = (w >> 25) & 7 == 5
@@ -1419,6 +1430,7 @@ def t_stack(h):
         ("set + led", "set display=off\nled off\n", None),
         ("reboot", "reboot\n", None),
         ("remount after eject + set", "set display=off\n", ejected),
+        ("webcam 5", "webcam 5\n", None),
     )
     for label, cmd, setup in cases:
         m = boot(cmd=cmd)
@@ -1487,6 +1499,453 @@ def t_v6(h):
         h.clean(m)
 
 
+# ---------------------------------------------------------------- webcam frame sizes
+V6_FRAMES = [(1920, 1080), (1280, 720), (640, 360), (320, 180), (256, 144), (128, 72)]
+V6_CFG_STOCK = 0xE39D0  # stock's config descriptor; nothing points at it in the patched image
+PROBE, PROBE_HOST, UVC_ERR = 0xE3B2C, 0x124428, 0x12440A  # committed probe, host's data, request error
+# register_desc table, +4 = config; EP0 state +0x28 data, +0x2c length, +0x36 wLength, +0x38 zero-length flag
+UVC_DESC = 0x134E34
+ZOOM_A, ZOOM_B = 0xF19F4, 0xF19C0  # per-path zoom bytes, paths 0 and 1 (0x12d68)
+SENSOR_TBL, SENSOR_OBJ = 0x124164, 0x00A05000  # [0] = sensor struct, W/H at +0x34/+0x36 (0x4bb94, 0x4bbd4)
+
+
+def syms():
+    S = {}
+    for line in open(SYM):
+        a, _, name = line.split()
+        S[name] = int(a, 16)
+    return S
+
+
+def descs(b):
+    """(offset, length, type, subtype, interface (number, alt, class, subclass)) per descriptor,
+    up to a length that does not fit"""
+    out, o, itf = [], 0, None
+    while o + 2 <= len(b):
+        n = b[o]
+        if n < 3 or o + n > len(b):
+            break
+        if b[o + 1] == 4:
+            itf = (b[o + 2], b[o + 3], b[o + 5], b[o + 6])
+        out.append((o, n, b[o + 1], b[o + 2], itf))
+        o += n
+    return out
+
+
+def t_v6_desc(h):
+    h.section = "webcam: config descriptor"
+    print("\nwebcam config descriptor v6_cfg: walk, lengths, frames, the two words that point at it")
+    d, base, S = open(IMAGE, "rb").read(), open(BASE, "rb").read(), syms()
+    c0 = S["v6_cfg"]
+
+    def w32(a):
+        return struct.unpack_from("<I", d, a + B)[0]
+
+    h.eq(w32(0x3EF00), c0, "pool 0x3ef00 (register_desc(1) in usb_uvc_init) = v6_cfg")
+    h.ok(c0 % 4 == 0 and GAP <= c0, f"v6_cfg {c0:#x} is 4-aligned (0xbc9cc reads it with word loads), in the gap")
+    tot = struct.unpack_from("<H", d, c0 + B + 2)[0]
+    cfg = d[c0 + B : c0 + B + tot]
+    h.ok(c0 + tot <= S["__gap_end"] <= GAP_END, f"wTotalLength {tot:#x}: v6_cfg ends inside the copied gap")
+    n0 = struct.unpack_from("<H", base, V6_CFG_STOCK + B + 2)[0]
+    old = base[V6_CFG_STOCK + B : V6_CFG_STOCK + B + n0]
+    h.eq(d[V6_CFG_STOCK + B : V6_CFG_STOCK + B + n0], old, "stock's config at 0xe39d0 left as stock")
+    ds, ods = descs(cfg), descs(old)
+    h.eq(sum(n for _, n, *_ in ds), tot, "descriptor lengths add up to wTotalLength")
+    h.eq((tot, len(ds)), (0x200, len(ods) + 5), f"512 B, {len(ods) + 5} descriptors: stock's {len(ods)} + 5 frames")
+    h.eq(cfg[4], len({i[0] for *_, i in ds if i}), "bNumInterfaces = the interfaces in it (4)")
+
+    vs = [x for x in ds if x[2] == 0x24 and x[4] and x[4][2:] == (0x0E, 2)]  # video streaming, class-specific
+    hdr = [x for x in vs if x[3] == 1]
+    fmt = [x for x in vs if x[3] == 6]
+    frm = [x for x in vs if x[3] == 7]
+    h.eq((len(hdr), len(fmt), len(frm)), (1, 1, 6), "one VS input header, one MJPEG format, six frames")
+    if not (hdr and fmt and frm):
+        return
+    ho, fo = hdr[0][0], fmt[0][0]
+    h.eq(
+        struct.unpack_from("<H", cfg, ho + 4)[0],
+        sum(x[1] for x in vs),
+        "VS header wTotalLength = header + format + frames",
+    )
+    h.eq(struct.unpack_from("<H", cfg, ho + 4)[0], 0xFD, "VS header wTotalLength 0xfd (stock 0x3f + 5 x 0x26)")
+    h.eq((cfg[fo + 3], cfg[fo + 4], cfg[fo + 6]), (1, 6, 1), "format 1: bNumFrameDescriptors 6, default frame 1")
+    got = []
+    for o, n, *_ in frm:
+        f = cfg[o : o + n]
+        got.append((f[3], *struct.unpack_from("<HH", f, 5), struct.unpack_from("<I", f, 17)[0]))
+    want = [(i + 1, w, hh, w * hh * 2) for i, (w, hh) in enumerate(V6_FRAMES)]
+    h.eq(got, want, "frames 1..6: 1920x1080 1280x720 640x360 320x180 256x144 128x72, buffer W*H*2")
+    f1 = cfg[frm[0][0] : frm[0][0] + 0x26]
+    same = all(cfg[o + 9 : o + 17] == f1[9:17] and cfg[o + 21 : o + 0x26] == f1[21:] for o, *_ in frm)
+    h.ok(same, "every frame: stock's bit rates and 30 fps (333333, continuous, min = max)")
+    oldf = [x for x in ods if x[2] == 0x24 and x[3] == 7][0][0]
+    h.eq(
+        (f1[:5], f1[9:17], f1[21:]),
+        (old[oldf : oldf + 5], old[oldf + 9 : oldf + 17], old[oldf + 21 : oldf + 0x26]),
+        "frame 1 is stock's frame 1 apart from W, H and buffer size",
+    )
+
+    def strip(b, walk):
+        """the descriptors minus the frames, with the three length fields zeroed"""
+        out = []
+        for o, n, t, s, itf in walk:
+            x = bytearray(b[o : o + n])
+            if t == 0x24 and s == 7 and itf and itf[2:] == (0x0E, 2):
+                continue
+            if t == 2:
+                x[2:4] = b"\0\0"
+            if t == 0x24 and s == 1 and itf and itf[2:] == (0x0E, 2):
+                x[4:6] = b"\0\0"
+            if t == 0x24 and s == 6 and itf and itf[2:] == (0x0E, 2):
+                x[4] = 0
+            out.append(bytes(x))
+        return out
+
+    h.eq(strip(cfg, ds), strip(old, ods), "everything else is stock's, in stock's order")
+    ep = [o for o, n, t, *_ in ds if t == 5 and cfg[o + 2] == 0x85]
+    oep = [o for o, n, t, *_ in ods if t == 5 and old[o + 2] == 0x85]
+    h.eq(oep[-1] + 4, 0xD4, "stock: the alt-3 EP 0x85 wMaxPacketSize is at cfg+0xd4 (0x52370 writes there)")
+    h.eq(w32(0x52488) + 0xD4, c0 + ep[-1] + 4, "pool 0x52488 + 0xd4 = v6_cfg's alt-3 wMaxPacketSize")
+
+    print("  the stock USB code on v6_cfg")
+    m = Machine(IMAGE, SYM)
+    m.call_arm(0x3EDC4, until=0x3EDD0)  # mov r0,#1; ldr r1,=[0x3ef00]; bl register_desc
+    h.eq(m.u32(UVC_DESC + 4), c0, "register_desc(1) at 0x3edc4 stores v6_cfg")
+    for typ in (2, 7):
+        m.call_arm(0x508B4, until=0x50860, regs={UC_ARM_REG_R4: UVC_DESC, UC_ARM_REG_R12: typ})
+        h.eq(
+            (m.u32(UVC_DESC + 0x28), m.u32(UVC_DESC + 0x2C), m.u8(c0 + 1)),
+            (c0, 0x200, typ),
+            f"GET_DESCRIPTOR type {typ} (0x508b4): v6_cfg, 512 B, byte 1 = {typ}",
+        )
+    for wlen, sent, zlp in ((9, 9, 0), (0xFF, 0xFF, 0), (0x200, 0x200, 0), (0x400, 0x200, 1)):
+        m.poke32(UVC_DESC + 0x2C, 0x200)
+        m.poke16(UVC_DESC + 0x36, wlen)
+        m.poke8(UVC_DESC + 0x38, 0)
+        m.call_arm(0x4D2E0)
+        h.eq(
+            (m.u32(UVC_DESC + 0x2C), m.u8(UVC_DESC + 0x38)),
+            (sent, zlp),
+            f"EP0 clamp 0x4d2e0, wLength {wlen:#x}: sends {sent:#x} B, zero-length packet flag {zlp}",
+        )
+    gw = m.watch_writes(GAP, GAP_END)
+    sw = m.watch_writes(V6_CFG_STOCK, V6_CFG_STOCK + n0)
+    m.call_arm(0x52364, until=0x52378)  # L2 event 10
+    h.eq(
+        [(a - c0, s, v) for a, s, v, _ in gw],
+        [(ep[-1] + 4, 1, 0), (ep[-1] + 5, 1, 4)],
+        "L2 event 10 writes 0x0400 to v6_cfg's alt-3 wMaxPacketSize, nothing else in the gap",
+    )
+    h.eq(sw, [], "and nothing at 0xe39d0")
+    h.clean(m)
+
+
+def t_v6_probe(h):
+    h.section = "webcam: probe"
+    print("\nprobe/commit SET_CUR 0x52644 per bFrameIndex: 0..6 pass, 7 fails with error 6")
+    m = Machine(IMAGE, SYM)
+    cases = [(i, 1, 333333, 0 if i <= 6 else 6) for i in range(8)]
+    cases += [(2, 2, 333333, 6), (2, 1, 666666, 6)]  # format 2, 15 fps: still refused
+    for idx, fmt, ival, err in cases:
+        m.put(PROBE_HOST, struct.pack("<HBBI", 1, fmt, idx, ival) + bytes(18))
+        m.poke8(UVC_ERR, 0xAA)
+        m.call_arm(0x52644, until=0x52530)
+        st = bytes(m.uc.mem_read(PROBE, 26))
+        h.eq(
+            (m.u8(UVC_ERR), st[3], struct.unpack_from("<II", st, 18)),
+            (err, idx, (0x1C2000, 0x400)),
+            f"format {fmt} frame {idx} interval {ival}: error {err}, index stored, "
+            "dwMaxVideoFrameSize 0x1c2000 and dwMaxPayloadTransferSize 0x400 as stock",
+        )
+
+
+def t_v6_size(h):
+    h.section = "webcam: frame size"
+    print("\nsensor_on(0x106)'s geometry 0xf004 per committed bFrameIndex, sensor 1920x1080")
+    m = Machine(IMAGE, SYM)
+    m.poke32(SENSOR_TBL, SENSOR_OBJ)
+    m.poke16(SENSOR_OBJ + 0x34, 1920)
+    m.poke16(SENSOR_OBJ + 0x36, 1080)
+    for idx in (0, 1, 2, 3, 4, 5, 6, 7, 0xFF):
+        w, hh = V6_FRAMES[idx - 1] if 1 <= idx <= 6 else V6_FRAMES[0]
+        g = m.alloc(0x40)
+        m.put(g, bytes(0x40))
+        m.poke16(ZOOM_A, 0)  # as after a boot into Metering: never set
+        m.poke16(ZOOM_B, 0)
+        m.poke8(PROBE + 3, idx)
+        m.reset()
+        r = m.call_arm(0xF004, g, 0x106, sp=STACK - 0x200)
+
+        def u16(o, g=g):
+            return m.u16(g + o)
+
+        out = "".join(chr(t[1]) for t in m.calls("uart"))
+        h.eq(
+            (
+                r,
+                (u16(6), u16(8)),
+                (u16(0xE), u16(0x10)),
+                (u16(0x1A), u16(0x1C), u16(0x1E), u16(0x20)),
+                (u16(0x32), u16(0x34)),
+                (m.u8(g + 0x30), m.u8(g + 0x31)),
+            ),
+            (0, (1920, 1080), (1920, 1080), (w, hh, w, hh), (w, hh), (9, 0)),
+            f"index {idx}: path 0 and target 1920x1080, second path and display {w}x{hh}",
+        )
+        h.eq(
+            [m.u8(a) for a in (ZOOM_A, ZOOM_A + 1, ZOOM_B, ZOOM_B + 1)],
+            [100] * 4,
+            f"index {idx}: zoom 100 on paths 0, 1",
+        )
+        h.ok(
+            f"[T]Dw:{w},Dh:{hh}," in out and "[Fmode]3,[Rmode]1)" in out and "Tw:1920,Th:1080" in out,
+            f"index {idx}: prints [T]Dw:{w},Dh:{hh}, Tw:1920,Th:1080 and [Fmode]3,[Rmode]1)",
+            f"({out!r})",
+        )
+    print("  v6_size itself: only r0, r3 and ip change")
+    regs = {r: 0x5000 + i for i, r in enumerate((UC_ARM_REG_R1, UC_ARM_REG_R2) + CALLEE_SAVED)}
+    m.poke8(PROBE + 3, 4)
+    m.call_arm(m.sym["v6_size"], sp=STACK - 0x100, regs=regs)
+    h.eq((m.reg(UC_ARM_REG_R0), m.reg(UC_ARM_REG_R3)), (320, 180), "index 4: r0 = 320, r3 = 180")
+    h.ok(all(m.reg(r) == v for r, v in regs.items()), "r1, r2, r4-r11 intact")
+    h.eq(m.reg(UC_ARM_REG_SP), STACK - 0x100, "sp intact")
+    h.clean(m)
+
+
+# ---------------------------------------------------------------- CMD.TXT webcam
+ONCE = "WEBCAM.ONE"
+
+
+def settle(m):
+    """after act_reboot came back with no power cut: the tick remounts the card, then flushes"""
+    for ms in (6000, 2100, 2100):
+        tick(m, ms)
+
+
+def opened(m, i0=0):
+    """(trace index, file name, flags) of each open from trace index i0"""
+    return [(i, m.cstr(t[1]), t[2]) for i, t in enumerate(m.trace) if i >= i0 and t[0] == "open"]
+
+
+def t_webcam_cmd(h):
+    h.section = "webcam command"
+    print("\nCMD.TXT webcam [MIN]: WEBCAM.ONE written and flushed, then the reboot path")
+    for arg, want in (
+        ("", b"0\r\n"),
+        (" 0", b"0\r\n"),
+        (" 5", b"5\r\n"),
+        (" 1440", b"1440\r\n"),
+        (" 05", b"5\r\n"),
+        ("\t7\r", b"7\r\n"),
+    ):
+        m = boot(cmd=f"webcam{arg}\n")
+        allow_reboot(m)
+        tick(m, 5000)
+        what = f"`webcam{arg.rstrip()}`"
+        h.eq(m.card.get(ONCE), want, f"{what}: WEBCAM.ONE holds {want!r}")
+        h.eq([t[2] for t in m.calls("apq")], [0x7007], f"{what}: one post, 0x7007")
+        tr, n = m.trace, m.names()
+        mk = [i for i, name, fl in opened(m) if name == "G:\\" + ONCE and fl == 0x601]
+        iu = n.index("unmount") if "unmount" in n else -1
+        ia = n.index("apq") if "apq" in n else -1
+        ok = (
+            len(mk) == 1
+            and n[mk[0] + 1 : mk[0] + 3] == ["write", "close"]
+            and "flush" in n[mk[0] : iu]
+            and n.index("flush", mk[0]) < iu < ia
+        )
+        h.ok(ok, f"{what}: marker created, written, closed and flushed before the unmount and the post", f"({n})")
+        h.ok(
+            not any(t[0] in ("open", "write", "unlink") for t in tr[iu:]),
+            f"{what}: no file call after the unmount: the marker stays for the next boot",
+        )
+        if arg == " 5":
+            tick(m, 2100)
+            h.has("[v5] webcam 5\r\n[v5] reboot\r\n", m=m)
+        h.clean(m)
+
+    print("  bad arguments: nothing written, nothing posted")
+    for arg in ("abc", "-1", "1441", "99999999999", "5x", "+5", "5 6", "0x5"):
+        m = boot(cmd=f"webcam {arg}\n")
+        allow_reboot(m)
+        tick(m, 5000)
+        tick(m, 2100)
+        h.ok(
+            ONCE not in m.card.names() and not m.calls("apq") and "unmount" not in m.names(),
+            f"`webcam {arg}`: no marker, no unmount, no post",
+            f"({m.card.names()}, {m.names()})",
+        )
+        h.has("cmd: bad webcam", f"`webcam {arg}`: LOG.TXT `cmd: bad webcam`", m=m)
+
+    print("  refused like reboot: nothing written")
+    for name, addr, val, wide in (
+        ("capture busy", B_CAPTURE_BUSY, 1, False),
+        ("recording", B_REC_FLAGS, 2, False),
+        ("record transition", B_REC_FLAGS, 8, False),
+        ("startup state", W_APP_STATE, 0x100, True),
+    ):
+        m = boot(cmd="webcam 5\n")
+        allow_reboot(m)
+        (m.poke16 if wide else m.poke8)(addr, val)
+        tick(m, 5000)
+        tick(m, 2100)
+        h.ok(
+            ONCE not in m.card.names() and not m.calls("apq") and "unmount" not in m.names(),
+            f"{name}: no marker, no unmount, no post",
+            f"({m.card.names()}, {m.names()})",
+        )
+        h.has("[v5] reboot 3", f"{name}: LOG.TXT `reboot 3`", m=m)
+
+    print("  the unmount fails: no post, the marker is deleted again")
+    m = boot(cmd="webcam 5\n")
+    allow_reboot(m)
+    m.unmount_ret = -1
+    tick(m, 5000)
+    tick(m, 2100)
+    h.eq((m.calls("apq"), ONCE in m.card.names()), ([], False), "no post, no WEBCAM.ONE left")
+    h.has("[v5] reboot ffffffff\r\n[v5] webcam: marker removed", m=m)
+    h.eq(leaks(m), {}, "no heap left behind")
+    h.clean(m)
+
+
+def t_webcam_boot(h):
+    h.section = "webcam boot"
+    print("\nboot with WEBCAM.ONE: deleted first, then the webcam on every switch position")
+    for mode in (0, 1, 2):
+        m = boot(files={ONCE: "5\r\n"}, mode=mode)
+        m.gpio_input(95, 0)
+        plug(m)
+        h.eq([t[2] for t in m.calls("qsend")], [0x8003], f"switch {mode}: plug-in posts the webcam init 0x8003")
+        h.ok(ONCE not in m.card.names(), f"switch {mode}: WEBCAM.ONE deleted")
+        tick(m, 2100)
+        h.has("[v5] webcam: boot 5\r\n", f"switch {mode}: LOG.TXT `webcam: boot 5`", m=m)
+        h.has(f"[v5] usb {mode} webcam", m=m)
+        h.eq(leaks(m), {}, f"switch {mode}: no heap left behind")
+    m = boot(mode=0)
+    m.gpio_input(95, 0)
+    plug(m)
+    h.eq([t[2] for t in m.calls("qsend")], [0x8001], "no marker, Photo: the drive, as before")
+
+    print("  the delete and its flush come before anything is acted on")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, ONCE: "5\r\n"}))
+    acts = []
+    for name in ("webcam_forced", "reboot_at"):
+        a = m.sym[name]
+
+        def wr(uc, access, addr, size, value, _, name=name):
+            if value:
+                acts.append((len(m.trace), name))
+
+        m.uc.hook_add(UC_HOOK_MEM_WRITE, wr, begin=a, end=a + (3 if name == "reboot_at" else 0))
+    mount(m)
+    n = m.names()
+    iu = [i for i, t in enumerate(m.trace) if t[0] == "unlink" and m.cstr(t[1]) == "G:\\" + ONCE]
+    ok = len(iu) == 1 and "flush" in n[iu[0] :] and acts and all(i > n.index("flush", iu[0]) for i, _ in acts)
+    h.ok(ok, "unlink, flush, then webcam_forced and the timer are set", f"(unlink {iu}, acts {acts}, {n})")
+    h.eq(sorted({x for _, x in acts}), ["reboot_at", "webcam_forced"], "both set")
+
+    print("  webcam 5: the reboot 5 minutes after the boot, not before")
+    m = boot(files={ONCE: "5\r\n"})
+    allow_reboot(m)
+    t0 = m.ticks  # load_settings ran at this tick
+    tick(m, 0)
+    m.ticks = t0 + 5 * 60000 - 2
+    tick(m)
+    h.eq(m.calls("apq"), [], "4:59.998 after the boot: nothing posted")
+    m.ticks = t0 + 5 * 60000 + 1
+    m.reset()
+    tick(m)
+    h.eq([t[2] for t in m.calls("apq")], [0x7007], "5:00 after the boot: 0x7007 posted")
+    h.called("unmount", "through act_reboot: the card unmounted first", m=m)
+    h.ok(ONCE not in m.card.names(), "no WEBCAM.ONE on the card: the next boot follows the switch")
+    settle(m)
+    h.has("[v5] webcam: time up\r\n[v5] reboot\r\n", m=m)
+    m2 = Machine(IMAGE, SYM, m.card)
+    mount(m2)
+    m2.poke8(B_USB_POLL_EN, 1)
+    m2.poke16(W_APP_STATE, 0x102)
+    m2.poke8(B_MODE, 0)
+    m2.gpio_input(95, 0)
+    plug(m2)
+    h.eq([t[2] for t in m2.calls("qsend")], [0x8001], "next boot on that card, Photo: the drive")
+    tick(m2, 10 * 60000)
+    h.eq(m2.calls("apq"), [], "and no timer")
+
+    print("  a refused reboot is tried again a minute later")
+    m = boot(files={ONCE: "1\r\n"})
+    allow_reboot(m)
+    m.poke8(B_CAPTURE_BUSY, 1)
+    tick(m, 60000 + 10)
+    h.eq(m.calls("apq"), [], "capturing at 1:00: nothing posted")
+    tick(m, 59000)
+    h.eq(len([t for t in m.trace if t[0] == "apq"]), 0, "nothing in the next 59 s")
+    m.poke8(B_CAPTURE_BUSY, 0)
+    tick(m, 1002)
+    h.eq([t[2] for t in m.calls("apq")], [0x7007], "60 s later, not busy: posted")
+    settle(m)
+    h.has("[v5] webcam: time up\r\n[v5] reboot 3\r\n", m=m)
+
+    print("  webcam (no minutes): the webcam until switched off, no timer")
+    m = boot(files={ONCE: "0\r\n"}, mode=0)
+    allow_reboot(m)
+    m.gpio_input(95, 0)
+    plug(m)
+    h.eq([t[2] for t in m.calls("qsend")], [0x8003], "Photo: the webcam")
+    tick(m, 2 * 24 * 3600 * 1000)
+    h.eq(m.calls("apq"), [], "two days later: nothing posted")
+    h.has("[v5] webcam: boot 0\r\n", m=m)
+
+    print("  the marker cannot be deleted: a normal boot, the marker stays")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, ONCE: "5\r\n"}))
+    m.unlink_ret = -1
+    mount(m)
+    m.poke8(B_USB_POLL_EN, 1)
+    m.poke16(W_APP_STATE, 0x102)
+    m.gpio_input(95, 0)
+    tick(m, 2100)  # the log goes out before the drive takes the card
+    h.has("[v5] webcam: rm fail", m=m)
+    h.ok("webcam: boot" not in log(m), "no `webcam: boot`")
+    plug(m)
+    h.eq([t[2] for t in m.calls("qsend")], [0x8001], "Photo: the drive")
+    h.eq(m.card.get(ONCE), b"5\r\n", "WEBCAM.ONE still there")
+    tick(m, 10 * 60000)
+    h.eq(m.calls("apq"), [], "no timer")
+
+    print("  a bad or unreadable marker is deleted and ignored")
+    for text, line in (
+        ("abc\r\n", "webcam: bad abc"),
+        ("1441\r\n", "webcam: bad 1441"),
+        ("-5", "webcam: bad -5"),
+        ("5 6\r\n", "webcam: bad 5 6"),
+        ("", "webcam: bad \r\n"),
+        ("1" * 20, "webcam: bad file"),
+    ):
+        m = boot(files={ONCE: text}, mode=0)
+        allow_reboot(m)
+        m.gpio_input(95, 0)
+        tick(m, 2100)
+        h.has(line, m=m)
+        plug(m)
+        tick(m, 10 * 60000)
+        h.ok(
+            ONCE not in m.card.names() and [t[2] for t in m.calls("qsend")] == [0x8001] and not m.calls("apq"),
+            f"{text[:8]!r}: deleted, Photo is the drive, no timer",
+            f"({m.card.names()}, {m.calls('qsend')}, {m.calls('apq')})",
+        )
+        h.eq(leaks(m), {}, f"{text[:8]!r}: no heap left behind")
+
+    print("  once per boot, after the update check")
+    m = boot(files={ONCE: "0\r\n"})
+    m.card.f[ONCE] = bytearray(b"5\r\n")  # put back over USB, then the card re-inserted
+    mount(m)
+    h.eq(m.card.get(ONCE), b"5\r\n", "a second mount in the same boot leaves a new marker for the next boot")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, ONCE: "5\r\n"}))
+    m.poke8(B_UPD_CHECKED, 2)  # the updater started on this boot
+    mount(m)
+    h.eq((m.card.get(ONCE), m.hits["load_settings"]), (b"5\r\n", 0), "a mount during an update: marker untouched")
+    h.clean(m)
+
+
 TESTS = (
     t_image,
     t_heap,
@@ -1517,6 +1976,11 @@ TESTS = (
     t_reentry,
     t_stack,
     t_v6,
+    t_v6_desc,
+    t_v6_probe,
+    t_v6_size,
+    t_webcam_cmd,
+    t_webcam_boot,
 )
 
 

@@ -2,6 +2,7 @@
 
 /* CMD.TXT: one command per line, results go to LOG.TXT when log=on.
  *   reboot                  RTC-alarm reboot after the log is flushed
+ *   webcam [MIN]            reboot once as the webcam, back MIN minutes later (webcam.c)
  *   display on|off, led on|off, sound on|off
  *   set KEY=VALUE           same as a C100.TXT line, applied now
  */
@@ -35,6 +36,8 @@ static void run_line(char *line)
 
 	if (v5_streq(t[0], "reboot")) {
 		act_reboot();
+	} else if (v5_streq(t[0], "webcam") && n <= 2 && (n == 1 || webcam_min(t[1]) >= 0)) {
+		webcam_cmd(n == 2 ? webcam_min(t[1]) : 0);
 	} else if ((v5_streq(t[0], "display") || v5_streq(t[0], "led") ||
 		    v5_streq(t[0], "sound")) && n == 2) {
 		char kv[32];

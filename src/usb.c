@@ -38,6 +38,9 @@ static u8 usb_want(void)
 
 	if (pos >= NPOS)
 		pos = POS_PHOTO;
+	/* a boot from CMD.TXT `webcam`: every position (webcam.c) */
+	if (webcam_forced)
+		return USB_WEBCAM;
 	w = cfg.usb[pos];
 	/* without a card usb_msdc_init exports LUN type 4, nothing useful */
 	if (w == USB_DRIVE && (B_MOUNT_FAIL || fw_card_id() == 0xff))

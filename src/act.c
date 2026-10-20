@@ -135,6 +135,14 @@ void act_long_select(void)
 	v5_log("toggle");
 }
 
+/* capturing, recording, or not in the video or photo state: no reboot now */
+int reboot_busy(void)
+{
+	u32 app = W_APP_STATE;
+
+	return B_CAPTURE_BUSY || (B_REC_FLAGS & 0xa) || (app != 0x101 && app != 0x102);
+}
+
 /* Posted rather than calling fw_reboot: every stock caller of 0x1fbac runs
  * in the AP task, the video state stops its pipeline (0x353f4) before it, and
  * if the power does not drop (as it might with VBUS present) the endless loop
@@ -143,10 +151,9 @@ void act_long_select(void)
  * "reboot X": X = the unmount error, 3 = busy, 2 = post failed, 1 = still on. */
 void act_reboot(void)
 {
-	u32 app = W_APP_STATE;
 	s32 r;
 
-	if (B_CAPTURE_BUSY || (B_REC_FLAGS & 0xa) || (app != 0x101 && app != 0x102)) {
+	if (reboot_busy()) {
 		v5_log("reboot %x", 3);
 		return;
 	}

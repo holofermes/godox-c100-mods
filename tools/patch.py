@@ -103,24 +103,80 @@ HOOKS = [
     (0x22A80, "f0402de9", "b", "v5_sound_gate", "play_effect entry: sound gate"),
 ]
 
-# Webcam gates (src/v6.S, docs/webcam.md). Neither runs at boot: the aspect gate runs on a
-# left/right press, the record gate on a record start. Not in the canary.
+# Webcam fixes (src/v6.S, docs/webcam.md). None runs at boot: the aspect gate runs on a
+# left/right press, the record gate on a record start, v6_size on a stream start. Not in the
+# canary.
 V6_HOOKS = [
     (0x2EC48, "e4c9ffeb", "bl", "v6_aspect_gate", "photo left/right: aspect step, gated while streaming"),
     (0x37104, "b5a8ffeb", "bl", "v6_aspect_gate", "video left/right: aspect step, gated while streaming"),
     (0x37134, "a9a8ffeb", "bl", "v6_aspect_gate", "video left/right: aspect step, gated while streaming"),
     (0x35898, "5c00000a", "b", "v6_rec_gate", "record start: beq kept, gated while streaming"),
+    (0xF510, "be00d4e1", "bl", "v6_size", "APMode 0x106 second path: ldrh r0,[r4,#0xe] -> the committed frame size"),
 ]
-# 1080p webcam: frame descriptor 1920x1080, and APMode 0x106's target 1920x1080
-# (full sensor, no crop). [0xf894] is a stock literal 0x438; 1080 has no ARM immediate.
-# For 720p (1280x720 centre crop): delete these four rows and the four "V6D" rows of
-# HOOKMAP in tests/test_v5.py, then run build.sh.
+# APMode 0x106's target 1920x1080 (full sensor, no crop); [0xf894] is a stock literal 0x438,
+# 1080 has no ARM immediate. Then the frame sizes: the second path gets the host's frame
+# (v6_size, r0 = W and r3 = H, so the second ldrh goes), the display size follows the second
+# path as in APMode 0x107 (0xf320, 0xf324), and the probe accepts bFrameIndex 0..6.
 V6_DATA = [
-    (0xF3C56, "0005d002", "80073804", "UVC frame 1: 1280x720 -> 1920x1080"),
-    (0xF3C62, "00201c00", "00483f00", "UVC frame 1: dwMaxVideoFrameBufferSize 1920*1080*2"),
     (0x1F2E4, "2d2ea0e3", "a8279fe5", "0x106 target height: mov r2,#0x2d0 -> ldr r2,[pc,#0x7a8] (=0x438)"),
     (0x1F2F0, "053ca0e3", "783ea0e3", "0x106 target width: mov r3,#0x500 -> mov r3,#0x780"),
+    (0x1F6E0, "b610d4e1", "ba11d4e1", "0x106 display width: ldrh r1,[r4,#6] -> ldrh r1,[r4,#0x1a]"),
+    (0x1F6E4, "b820d4e1", "bc21d4e1", "0x106 display height: ldrh r2,[r4,#8] -> ldrh r2,[r4,#0x1c]"),
+    (0x1F714, "b031d4e1", "0000a0e1", "0x106 second path: ldrh r3,[r4,#0x10] -> nop, v6_size returns H"),
+    (0x629D4, "010053e3", "060053e3", "probe bFrameIndex: cmp r3,#1 -> cmp r3,#6"),
+    (0x629D8, "a6ffff1a", "a6ffff8a", "probe bFrameIndex: bne 0x52678 -> bhi 0x52678, 0..6 pass"),
 ]
+
+# The UVC config descriptor (src/v6.S v6_cfg). Stock's at 0xe39d0 has one MJPEG frame and the
+# device descriptor right after it. v6_cfg must be stock's bytes with frame 1 at 1920x1080 and
+# frames 2.. inserted after frame 1, and nothing else changed. Two words point at stock's copy:
+# register_desc(1) in usb_uvc_init (pool 0x3ef00, loaded at 0x3edc8) and the L2 event that
+# writes the alt-3 wMaxPacketSize 0x0400 at cfg+0xd4 (pool 0x52488, 0x52364..0x52374); both
+# move to v6_cfg, the second by how far that field moved.
+V6_CFG = 0xE39D0
+V6_FRAMES = [(1920, 1080), (1280, 720), (640, 360), (320, 180), (256, 144), (128, 72)]
+V6_L2 = (0x52364 + B, "1c319fe50010a0e30420a0e3d410c3e5d520c3e5", 0xD4)  # ldr r3,=cfg; strb at +0xd4, +0xd5
+
+
+def descs(b):
+    """(offset, length, type, subtype, (class, subclass) of the interface it belongs to)"""
+    out, o, cls = [], 0, None
+    while o < len(b):
+        n = b[o]
+        assert n >= 3 and o + n <= len(b), (hex(o), n)
+        if b[o + 1] == 4:
+            cls = (b[o + 5], b[o + 6])
+        out.append((o, n, b[o + 1], b[o + 2], cls))
+        o += n
+    return out
+
+
+def v6_cfg_want(img):
+    n = struct.unpack_from("<H", img, V6_CFG + B + 2)[0]
+    old = bytes(img[V6_CFG + B : V6_CFG + B + n])
+    vs = [(o, s) for o, _, t, s, c in descs(old) if t == 0x24 and c == (0x0E, 2)]  # video streaming
+    hdr, fmt, frm = ([o for o, s in vs if s == k] for k in (1, 6, 7))
+    assert len(hdr) == len(fmt) == len(frm) == 1 and old[frm[0] + 3] == 1, (hdr, fmt, frm)
+    f1 = old[frm[0] : frm[0] + old[frm[0]]]
+    frames = b""
+    for i, (w, h) in enumerate(V6_FRAMES):
+        f = bytearray(f1)
+        f[3] = i + 1
+        struct.pack_into("<HH", f, 5, w, h)
+        struct.pack_into("<I", f, 17, w * h * 2)  # dwMaxVideoFrameBufferSize, as stock's 1280*720*2
+        frames += f
+    new = bytearray(old[: frm[0]] + frames + old[frm[0] + len(f1) :])
+    grow = len(frames) - len(f1)
+    struct.pack_into("<H", new, 2, len(new))
+    new[fmt[0] + 4] = len(V6_FRAMES)
+    struct.pack_into("<H", new, hdr[0] + 4, struct.unpack_from("<H", old, hdr[0] + 4)[0] + grow)
+    return old, bytes(new)
+
+
+def ep_size_at(b, ep):
+    """offset of the last wMaxPacketSize of endpoint ep (the highest alt setting)"""
+    return [o for o, _, t, _, _ in descs(b) if t == 5 and b[o + 2] == ep][-1] + 4
+
 
 # CANARY=1 (docs/hooks.md): same boot-time hooks, stubs, loader and heap reservation, the
 # overlay from canary/canary.c. The canary leaves the unplug pool word (G4) as in the base
@@ -142,11 +198,24 @@ DATA = [STACK4K, HEAP] if CANARY else [G4, STACK4K, HEAP, *V6_DATA]
 if not CANARY:
     HOOKS += V6_HOOKS
 
-# The MSC eject callback word (SD LUN ops +0x30): stock reaches it with blx r2 at
-# 0x4e914. eject_stub is ARM, so bit 0 stays clear.
+# Words that become the address of a gap symbol, plus an offset. The MSC eject callback word
+# (SD LUN ops +0x30): stock reaches it with blx r2 at 0x4e914. eject_stub is ARM, so bit 0
+# stays clear.
 WORD_HOOKS = [
-    (0xE0978, "d4e20b00", "eject_stub", False, "SD LUN ops +0x30 eject callback: gate, then note the handback")
+    (0xE0978, "d4e20b00", "eject_stub", False, 0, "SD LUN ops +0x30 eject callback: gate, then note the handback")
 ]
+if not CANARY:
+    v6_old, v6_want = v6_cfg_want(d)
+    c0 = sym["v6_cfg"]
+    assert c0 % 4 == 0 and GAP <= c0 and c0 + len(v6_want) <= g1, hex(c0)
+    assert gap[c0 - GAP : c0 - GAP + len(v6_want)] == v6_want, "src/v6.S v6_cfg is not stock's config + V6_FRAMES"
+    assert d[V6_L2[0] : V6_L2[0] + 20].hex() == V6_L2[1] and ep_size_at(v6_old, 0x85) == V6_L2[2]
+    moved = ep_size_at(v6_want, 0x85) - V6_L2[2]
+    WORD_HOOKS += [
+        (0x3EF00, "d0390e00", "v6_cfg", False, 0, "register_desc(1) in usb_uvc_init: config 0xe39d0 -> v6_cfg"),
+        (0x52488, "d0390e00", "v6_cfg", False, moved, f"alt-3 wMaxPacketSize write at cfg+0xd4: + {moved:#x}"),
+    ]
+    print(f"v6_cfg {c0:#x}: {len(v6_want)} B, stock's {len(v6_old)} B config with {len(V6_FRAMES)} frames")
 
 # G7, the auto-off variant covering VBUS states 1 and 2. Disassembled in the image:
 # cmp r0,#0 / movne fp,#0 / strne fp,[r8] / bne 0x22390, so the counter is held while
@@ -172,16 +241,16 @@ for at, old, kind, val, why in HOOKS:
     d[off : off + len(new)] = new
     print(f"RAM {at:#07x} file {off:#08x}: {old.hex()} -> {new.hex()}  {why}")
 
-for at, old, name, thumb, why in WORD_HOOKS:
+for at, old, name, thumb, add, why in WORD_HOOKS:
     old = bytes.fromhex(old)
     off = at + B
     assert d[off : off + len(old)] == old, (hex(at), d[off : off + len(old)].hex(), old.hex())
     t = sym[name]
     assert (t & 1) == thumb, f"{name}: state bit {t & 1}, want {int(thumb)}"
-    assert GAP <= (t & ~1) < g1, (name, hex(t))
-    new = struct.pack("<I", t)
+    assert GAP <= (t & ~1) + add < g1, (name, hex(t), add)
+    new = struct.pack("<I", t + add)
     d[off : off + len(new)] = new
-    print(f"RAM {at:#07x} file {off:#08x}: {old.hex()} -> {new.hex()}  {why} ({name})")
+    print(f"RAM {at:#07x} file {off:#08x}: {old.hex()} -> {new.hex()}  {why} ({name}{f' + {add:#x}' if add else ''})")
 
 for off, old, new, why in DATA:
     oldb, newb = bytes.fromhex(old), bytes.fromhex(new)
@@ -233,7 +302,7 @@ print(
 
 # no hook may land inside the gap or the overlay, and no two hooks may overlap
 regions = [(a + B, a + B + 4) for a, *_ in HOOKS]
-regions += [(a + B, a + B + 4) for a, _, _, _, _ in WORD_HOOKS]
+regions += [(a + B, a + B + 4) for a, *_ in WORD_HOOKS]
 regions += [(o, o + 4) for o, _, _, _ in DATA]
 regions += [(o, o + 1) for o, _, _, _ in BYTE_HOOKS]
 regions.sort()

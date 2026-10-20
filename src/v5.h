@@ -121,11 +121,19 @@ void cfg_apply(void); /* push cfg into the hardware: display, LED, sound, log */
 void act_display(u8 on);
 void act_led(u8 on);
 void act_sound(u8 on);
+int reboot_busy(void); /* capturing, recording or not in photo/video: act_reboot refuses */
 void act_reboot(void); /* returns only when refused, or still powered after 3 s */
 s32 act_sound_gate(s32 id);    /* 1 = let stock play, 0 = return -1 like stock invalid id */
 void act_long_select(void);    /* the C side of the K1 gesture */
 void act_tick(void);           /* from v5_tick every pass: LCD, LED, chime, handback */
 void act_host_released(void);  /* start the drive handback; act_tick writes LUN 0 once idle */
+
+/* ---- webcam.c ---- */
+extern u8 webcam_forced;         /* this boot is the webcam on every switch position */
+s32 webcam_min(const char *s);   /* minutes 0..1440, -1 if not a number in range */
+void webcam_cmd(s32 min);        /* CMD.TXT webcam: write the marker, reboot */
+void webcam_boot(void);          /* from load_settings: act on the marker once per boot */
+void webcam_tick(void);          /* from v5_tick: the reboot MIN minutes after the boot */
 
 /* ---- stubs.S (gap) ---- */
 CROSS u32 v5_irq_save(void);

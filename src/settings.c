@@ -52,6 +52,8 @@ void load_settings(void)
 	/* cfg: display led sound log, then usb photo video meter */
 	v5_log("cfg %u%u%u%u usb %u%u%u", cfg.display, cfg.led, cfg.sound, cfg.log,
 	       cfg.usb[POS_PHOTO], cfg.usb[POS_VIDEO], cfg.usb[POS_METER]);
+	/* WEBCAM.ONE from CMD.TXT `webcam`, first mount of a boot only */
+	webcam_boot();
 	/* arms every hook (stubs.S); never reached on a boot that flashes */
 	st.booted = 1;
 }

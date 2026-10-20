@@ -37,6 +37,11 @@ Tested on a C100 with a V1.1.6 build:
 - `CMD.TXT` on the card, run when the camera finds it.
 - No auto power-off while on USB power.
 
+Built, not yet tested on the camera:
+
+- Webcam frame sizes 1280x720, 640x360, 320x180, 256x144 and 128x72, all from the full sensor.
+- `webcam [MIN]` in `CMD.TXT`: one boot as the webcam whatever the switch.
+
 Limits:
 
 - After the camera has been a USB drive (on a PC or a charger), power-cycle it before using the webcam.
@@ -114,6 +119,9 @@ Commands, one per line, in the card root. Checked about every 3 s while the came
     set KEY=VALUE       a C100.TXT line, applied now
     reboot              flush the log and restart, unless recording or capturing; with a cable
                         in, USB comes back by itself
+    webcam [MIN]        restart as the webcam, whatever the switch, for that boot only; with
+                        MIN (1 to 1440), restart again MIN minutes later and follow the switch
+                        (docs/usb.md). Not yet tested on the camera
 
 ## LOG.TXT
 
@@ -133,14 +141,18 @@ The camera enumerates only when the cable goes into a camera that is already on.
           --format=MJPEG --encoder=HW --resolution=1920x1080 --host=0.0.0.0 --port=8080
 
   Then open `http://localhost:8080/stream`, or the machine's address from another device.
+  Frame sizes, all 16:9 from the full sensor: 1920x1080 (the default), 1280x720, 640x360,
+  320x180, 256x144, 128x72. Pick one with `--resolution=256x144` in ustreamer, or
+  `v4l2-ctl --set-fmt-video=width=256,height=144,pixelformat=MJPG`. Only 1920x1080 is tested on
+  the camera so far.
 
 ## Docs
 
 - `docs/hardware.md`: board, screen, LED, buttons, pins
 - `docs/firmware.md`: image layout, boot, card updater, recovery limits
 - `docs/hooks.md`: how the patch works, the overlay, the hook table, the tests
-- `docs/usb.md`: USB modes and the states behind them
-- `docs/webcam.md`: 1080p, left/right and recording while streaming, 720p
+- `docs/usb.md`: USB modes and the states behind them, one boot as the webcam
+- `docs/webcam.md`: 1080p, frame sizes, left/right and recording while streaming
 
 ## Credits
 

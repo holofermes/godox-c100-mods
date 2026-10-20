@@ -62,6 +62,31 @@ deleted the file and ran it, and the host saw the card again about 4 s after the
 `display on` and `led on` switched the LCD and LED; `reboot` restarted the camera, and with the
 cable still in it came back as the drive about 5 s after the eject [seen].
 
+## One boot as the webcam
+
+CMD.TXT `webcam [MIN]` restarts the camera as the webcam whatever the switch; with MIN, 1 to
+1440, it restarts again MIN minutes after that boot, and that boot follows the switch. Not yet
+tested on the camera.
+
+- The command first makes the checks `reboot` makes (no capture, no recording, photo or video
+  state; else `reboot 3` and nothing is written). Then it writes `WEBCAM.ONE` in the card root
+  holding MIN (0 without it), flushes the card and reboots the way `reboot` does
+  (`src/webcam.c`). If the reboot fails with the card still mounted, the file is deleted again.
+- On the next boot load_settings, after the update check, reads `WEBCAM.ONE`, deletes it,
+  flushes, and acts on it only if the delete worked: the webcam on every switch position for
+  this boot, and with MIN a reboot MIN minutes later, tried again every minute while refused. A
+  file that cannot be deleted is left alone and the boot is a normal one; one that is not a
+  number from 0 to 1440, or is over 16 B, is deleted and ignored. The file is gone before the
+  webcam boot starts, so it never acts twice.
+- `LOG.TXT`: `webcam N` and `reboot` from the command; `webcam: boot N`, then `webcam: time up`
+  and `reboot`; `webcam: rm fail`, `webcam: bad X`, `webcam: bad file`, `webcam: write fail`,
+  `webcam: marker removed`.
+- The command comes in over a drive session, and a webcam session after a drive session in the
+  same power cycle has failed so far (above). The webcam boot relies on the reboot resetting the
+  USB side [inferred]; that is the first thing the camera test has to show.
+- In Photo this is the same path as `usb_photo=webcam`, also not tested on the camera. Metering
+  is a sub-mode of the photo state (0x2ebe4), so the reboot is not refused there [inferred].
+
 ## Audio
 
 The webcam descriptor includes a UAC1 microphone (mono, 16-bit, 16 kHz, iso EP 0x87, alt

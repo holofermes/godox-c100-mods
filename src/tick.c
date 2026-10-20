@@ -110,6 +110,7 @@ void v5_tick(void)
 	}
 
 	act_tick(); /* LCD, LED, late chime, drive handback */
+	webcam_tick(); /* the reboot MIN minutes after a `webcam MIN` boot */
 
 	/* The eject callback ran the SD uninit 0xb3844, so the card is re-inited
 	 * before anyone touches it. While the LUN still reads 0xffaa the host
