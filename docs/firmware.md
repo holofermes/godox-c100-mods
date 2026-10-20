@@ -1,8 +1,6 @@
 # Firmware
 
 Tags: [read] = read in the firmware, [seen] = observed on a camera, [inferred] = deduction.
-[seen, V1.1.3] = observed on a camera running firmware V1.1.3 or this patch's earlier build for
-it; not repeated on V1.1.6.
 
 Stock: V1.1.6, [Godox_C100_V1.1.6.zip](https://www.godox.com/Downloads/Godox_C100_V1.1.6.zip)
 from godox.com (sha256 `3fc9b15c03f89fbe1a0d6f23d081ec1b312cdedd42a99115a6f47d639d9598d1`).
@@ -67,15 +65,13 @@ Part of the app, not the boot block [read]:
    blocks from flash 0 upward, programs 256 B pages and compares each page with the RAM copy, up
    to 20 retries per block.
 5. No signature, no checksum over the file, no model or version check.
-6. It deletes the file and restarts the camera (0x1fbac: RTC alarm and watchdog) [seen, V1.1.3].
+6. It deletes the file and restarts the camera (0x1fbac: RTC alarm and watchdog) [seen].
    The clock resets. A file with the FAT read-only bit is kept and the camera powers off instead.
 
-A full NOR dump read back from a running camera matched the flashed image byte for byte, and
-the rest of the chip was erased [seen, V1.1.3, one dump]. The firmware has a settings writer
-(0x59bc0) that erases and programs flash above the resources, from 0x170000 plus the resource
-area rounded up [read]; it never touches 0x100000..0x170000. The updater writes the file to
-flash byte for byte [read]; the patch relies on it to find its overlay in flash at the file
-offset.
+The firmware has a settings writer (0x59bc0) that erases and programs flash above the
+resources, from 0x170000 plus the resource area rounded up [read]; it never touches
+0x100000..0x170000. The updater writes the file to flash byte for byte [read]; the patch relies
+on it to find its overlay in flash at the file offset.
 
 ## Recovery limits
 
@@ -90,8 +86,8 @@ offset.
 - JTAG is not disabled by the firmware [read]; untested, needs the case open.
 
 The patch is built around the first point: its features load and switch on only after the update
-check (docs/hooks.md). The boot-time part was proven on a camera with the canary for the V1.1.3
-build [seen, V1.1.3]; the V1.1.6 canary is not yet run.
+check (docs/hooks.md). The boot-time part was proven on a camera with the canary [seen]. Stock
+V1.1.6 flashes over the patched image, and the patched image over stock [seen].
 
 ## Useful stock functions
 

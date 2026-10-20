@@ -10,7 +10,7 @@
  *   - the CRC-32 the loader checked, from the header at 0xff0000 (build.sh
  *     prints the build's): the overlay that ran is the one in this image;
  *   - st.sound_pending: 2 means S1 held the startup chime (the only id 2
- *     player in V1.1.6) on the way up, proof that a disarmed stub ran on the
+ *     player in stock) on the way up, proof that a disarmed stub ran on the
  *     camera. A failed load writes `ovl err N` instead (loader.c). */
 
 extern u32 __ovl_base[]; /* link.ld: the header, magic len crc pad */

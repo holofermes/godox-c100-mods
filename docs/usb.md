@@ -1,9 +1,6 @@
 # USB
 
 Tags: [read] = read in the firmware, [seen] = observed on a camera, [inferred] = deduction.
-[seen, V1.1.3] = observed on a camera running firmware V1.1.3 or this patch's earlier build for
-it; not repeated on V1.1.6. The USB code read here is the same in V1.1.6, moved [read], but the
-V1.1.6 build is not yet tested on a camera.
 
 ## Personalities
 
@@ -32,11 +29,10 @@ patch changes the plug-in word to 0x8003. The patch posts per switch position fr
   polls (~16 s) stock restores the full key table; a drive init cuts keys to power only until
   then.
 - state 2: a host configured a drive session (the drive init's SET_CONFIG callback). Buttons
-  and the switch do nothing. Unplugging posts 0x700f and the camera powers off [read; seen,
-  V1.1.3].
+  and the switch do nothing. Unplugging posts 0x700f and the camera powers off [read; seen].
 
 The camera enumerates only when the cable goes into a camera that is already on; powering on
-with the cable in gives no USB activity [seen, V1.1.3].
+with the cable in gives no USB activity [inferred].
 
 ## What the patch changes
 
@@ -49,10 +45,9 @@ with the cable in gives no USB activity [seen, V1.1.3].
   enter state 2, power the sensor down and power off at unplug.
 - No auto power-off in states 1 and 2 (stock: state 2 only).
 
-Drive then webcam in one power cycle does not work [seen, V1.1.3]: after a drive init on a
-charger and an unplug, a webcam plug-in reports `drv_l2_usbd_uvc_init ok`, but the host gets
-only resets and gives up (`Device not responding to setup address`). The drive setup is never
-undone, and the webcam init does not replace it [inferred]. Power-cycle in between.
+Drive then webcam in one power cycle does not work: after a drive init (on a PC or a charger)
+and an unplug, the drive setup is never undone, and a webcam init does not replace it
+[inferred]. Power-cycle in between.
 
 ## Eject
 
@@ -61,14 +56,14 @@ calls the eject callback, which uninits the SD driver. The patch wraps the callb
 card as off limits before the uninit, remounts it on the next tick, runs `CMD.TXT`, flushes
 `LOG.TXT`, waits 2 s, then writes LUN 0 = 1 so the host sees the card again, read fresh [read].
 
-On the camera: the host saw the card return about 4 s after the eject, with `[v5] remount 0`,
-`[v5] eject`, `[v5] handback` in `LOG.TXT` [seen, V1.1.3]. With `set led=off`, `set
-sound=off`, `reboot` in `CMD.TXT`, the eject ran them and the camera restarted by itself; with
-the cable still in, it came back as the drive 7 s after the eject [seen, V1.1.3].
+On the camera, with `CMD.TXT` written over USB: after the eject the camera remounted the card,
+deleted the file and ran it, and the host saw the card again about 4 s after the eject, with
+`[v5] remount 0`, `[v5] eject`, `[v5] handback` in `LOG.TXT` [seen]. `display off`, `led off`,
+`display on` and `led on` switched the LCD and LED; `reboot` restarted the camera, and with the
+cable still in it came back as the drive about 5 s after the eject [seen].
 
 ## Audio
 
 The webcam descriptor includes a UAC1 microphone (mono, 16-bit, 16 kHz, iso EP 0x87, alt
-setting 5). It enumerates as an ALSA card [seen, V1.1.3]. Capture was never tried. In the code
-the webcam path does not start the audio ADC or feed EP 0x87 [read], so expect silence or
-nothing. Not implemented here.
+setting 5). The webcam path does not start the audio ADC or feed EP 0x87 [read], so expect
+silence or nothing. Not implemented here.

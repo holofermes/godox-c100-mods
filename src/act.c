@@ -74,7 +74,7 @@ void act_sound(u8 on)
 	v5_log("sound %s", on ? "on" : "off");
 }
 
-/* the sound id (2 or 3) the S1 stub held while disarmed; in V1.1.6 only the
+/* the sound id (2 or 3) the S1 stub held while disarmed; in stock only the
  * startup chime plays id 2 and nothing plays id 3 */
 static void chime(void)
 {

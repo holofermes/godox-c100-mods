@@ -128,7 +128,8 @@ V6_DATA = [
 CANARY = os.environ.get("CANARY") == "1"
 
 # Pool words and data patches, by file offset. The peripheral task stack goes to
-# 4 KB (docs/hooks.md); it is used at boot before the updater, proven by the canary.
+# 4 KB (docs/hooks.md); it is used at boot before the updater, proven on the camera
+# by the CANARY=1 build.
 G4 = (0x3680C, "05800000", "02800000", "unplug pool: 0x8005 back to 0x8002, the patch posts the uninit")
 STACK4K = (0xEAC2C, "00080000", "00100000", "peripheral task stack 0x800 -> 0x1000 B (InitTask def 0xdaa1c)")
 HEAP = (

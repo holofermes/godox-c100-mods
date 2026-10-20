@@ -247,7 +247,7 @@ v5_get95:
 @ ids return -1, the stock invalid-handle value, before the amp is opened.
 @ Disarmed (before the first mount, without a card, after a failed overlay
 @ load, and for the whole canary run): ids 2 and 3 are parked in
-@ st.sound_pending and return -1, every other id plays as stock. In V1.1.6
+@ st.sound_pending and return -1, every other id plays as stock. In stock
 @ only the startup chime (0x35124) plays id 2, and nothing plays id 3; the
 @ over-temperature warning (0x7017) plays id 0 through 0x27a30 and passes.
 @ Once armed, chime() replays a parked id once if sound is on and the boot is

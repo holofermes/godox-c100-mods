@@ -1,8 +1,6 @@
 # How the patch works
 
 Tags: [read] = read in the firmware, [seen] = observed on a camera, [inferred] = deduction.
-[seen, V1.1.3] = observed on a camera running firmware V1.1.3 or this patch's earlier build for
-it; not repeated on V1.1.6. Nothing on this page has run on a V1.1.6 camera yet.
 
 `tools/base.py` turns stock into the base image (webcam on plug-in, no auto power-off on USB
 power). `tools/patch.py` then puts the patch's code in two places and patches branches into
@@ -23,7 +21,8 @@ The stock image leaves 5,784 B of RAM unused, too little for all of it. So the c
   so the heap ends at 0xFEFF80 instead of 0xFFFF80; no stock code or data refers to the range
   [read]. All the feature code, with its data and .bss, is linked there. Its bytes are stored in
   the update file's zero padding at file 0x100000, past what the boot block copies. The updater
-  writes the file to flash byte for byte, so that is also where they are in flash.
+  writes the file to flash byte for byte, so that is also where they are in flash. With the 64 KB
+  taken from the heap, the free heap stayed at 10,963,456 B while a PC streamed [seen].
 
 C is Thumb (`-mthumb -Os`); the stubs and webcam fixes are ARM, as the stock code is. Calls between
 the gap and the overlay go through a register: the two are 15.7 MB apart, beyond a Thumb BL.
@@ -51,6 +50,9 @@ if no load has worked yet, it loads the overlay:
    is still in the D-cache [read].
 7. Call the overlay's `load_settings`.
 
+On the camera the overlay loads on every boot; with `log=on` each boot logs
+`[v5] v5 1348+5220 B, C100.TXT ok`, the bytes used in the gap and in the overlay [seen].
+
 Any failure (reader not up, a page read error, wrong magic, another build's length or CRC, a
 body that does not match its CRC) returns before step 7 and appends `ovl err N` to `LOG.TXT`,
 whatever the log setting: 1 reader not up, 2 read error, 3 magic, 4 length, 5 body CRC, 6
@@ -69,7 +71,7 @@ stack, inside the 0x58 B frame the VERSION.TXT writer has just released (emulato
 
 Until the camera has read the card and checked it for a firmware update, every hook except SET runs
 only the stock instruction it replaced, and none of the patch's C runs. The sound hook also catches
-sound ids 2 and 3 and does not play them: in V1.1.6 only the startup chime plays id 2 (0x35124) and
+sound ids 2 and 3 and does not play them: in stock only the startup chime plays id 2 (0x35124) and
 nothing plays id 3, while the over-temperature warning (message 0x7017) plays id 0 through 0x27a30
 and is let through [read]. A caught id is played once the features switch on, if sound is on and
 the camera has been on for under 15 s. SET always calls `v5_set`, the loader; without it the
@@ -118,10 +120,9 @@ fixes and 1080p data; LOG, SET, STACK and HEAP are named for what they patch. Th
 | V6D | 0xf0e4, 0xf0f0, file 0xf3c56, 0xf3c62 | webcam size | 1920x1080 | stream start |
 
 The peripheral task stack goes to 4 KB because the patch's card writes run in that task and a
-static bound with stock FAT and SD frames reached 3.1 KB on SD error paths (the FAT and SD driver
-code the bound was made on is unchanged here apart from its addresses and two SD retry setters
-[read]). The stack size is read only by InitTask's copy of the task table (literal at 0x5f22c), and
-pvPortMalloc serves a 4 KB request from its pool or the heap [read].
+static bound with stock FAT and SD frames comes to at most 3.1 KB, on SD error paths. The stack
+size is read only by InitTask's copy of the task table (literal at 0x5f22c), and pvPortMalloc
+serves a 4 KB request from its pool or the heap [read].
 
 The low-battery power-off only runs while no USB power is present, so on USB power it never turns
 the camera off [read].
@@ -147,8 +148,8 @@ in the emulator and the disassembly only. Redo the canary after any change to `s
 `src/loader.c`, the load length, the stack size or the heap literal. Check changes to `src/v6.S` in
 the emulator.
 
-The canary for the V1.1.3 build was flashed on a camera, booted and logged, flashed stock from
-itself, then itself again [seen, V1.1.3]. The V1.1.6 canary has not been run yet.
+The canary was flashed on a camera, booted and logged, flashed stock from itself, then was
+flashed again from stock [seen].
 
 ## Tests
 
@@ -176,5 +177,3 @@ checked), real SD, flash or USB behaviour, or failures of malloc, read, write or
 - `play_effect` for the late power-on chime runs from the peripheral task, and the RTC read for
   log headers takes no lock; both share state with other tasks.
 - Each log flush copies up to 8 KB with IRQs masked.
-- Untested on a camera: everything on V1.1.6, including the overlay load, the heap
-  reservation and a failed load.
