@@ -1,0 +1,594 @@
+# End-to-end emulation of the payload: hooks, C, stock calls, virtual card.
+# Imported by test_v5.py and test_canary.py. Image is a built image
+# (build/GP_CARDVR_UPGRADE.BIN, or build/TEST-ONLY.bin padded to 2 MiB), sym is
+# obj/v5.sym.
+#
+# The card is a dict of names to bytes. Stock file, heap, HT1621, sound body,
+# queue and USB calls are modelled in Python and recorded in Machine.trace; each
+# model returns what the disassembly of the real function returns (address and
+# return values noted above the less obvious f_* models). Real stock code that
+# runs unmodelled: printf 0x53584 (so its lines go through the LOG hook at
+# 0x535e0 into logcap), newlib vsnprintf and the libc thunks, gpio_set 0x43224
+# and gpio_get 0x431e8 against the GPIO MMIO at 0xC0000000 (output +4, input +0
+# per bank of 16), card id 0x26118, the MSC LUN register 0x4e89c and START STOP
+# UNIT 0x4e708.
+#
+# Tasks: the payload asks "am I the peripheral task" by comparing pxCurrentTCB
+# with the peripheral task handle, so Machine.task() sets both words.
+import struct
+
+from unicorn import UC_ARCH_ARM, UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UC_MODE_ARM, Uc, UcError
+from unicorn.arm_const import (
+    UC_ARM_REG_CPSR,
+    UC_ARM_REG_LR,
+    UC_ARM_REG_PC,
+    UC_ARM_REG_R0,
+    UC_ARM_REG_R1,
+    UC_ARM_REG_R2,
+    UC_ARM_REG_R3,
+    UC_ARM_REG_R4,
+    UC_ARM_REG_R5,
+    UC_ARM_REG_R6,
+    UC_ARM_REG_R7,
+    UC_ARM_REG_R8,
+    UC_ARM_REG_R9,
+    UC_ARM_REG_R10,
+    UC_ARM_REG_R11,
+    UC_ARM_REG_R12,
+    UC_ARM_REG_SP,
+)
+
+B = 0x10200
+RET = 0x00FFF000  # magic return address, emulation stops here
+TRAMP = 0x00FFF100  # injected calls return here
+STACK = 0x00FF0000
+STACK_LO = STACK - 0x10000
+HEAP = 0x00400000
+BX_LR = bytes.fromhex("1eff2fe1")
+CPSR_TASK = 0x1F  # SYS mode, ARM, IRQs enabled: how a FreeRTOS task runs
+REGS = (
+    UC_ARM_REG_R0,
+    UC_ARM_REG_R1,
+    UC_ARM_REG_R2,
+    UC_ARM_REG_R3,
+    UC_ARM_REG_R4,
+    UC_ARM_REG_R5,
+    UC_ARM_REG_R6,
+    UC_ARM_REG_R7,
+    UC_ARM_REG_R8,
+    UC_ARM_REG_R9,
+    UC_ARM_REG_R10,
+    UC_ARM_REG_R11,
+    UC_ARM_REG_R12,
+)
+CALLEE_SAVED = REGS[4:12]  # r4-r11
+
+# stock functions
+A_OPEN, A_READ, A_WRITE, A_LSEEK, A_CLOSE = 0x9E434, 0x9E4A8, 0x9E7F4, 0x9E2E0, 0x9DAA8
+A_UNLINK, A_STAT, A_FLUSH, A_MOUNT, A_UNMOUNT = 0x9E798, 0x9E6C0, 0x9AA98, 0x9DD78, 0x9DDBC
+A_RENAME, A_SDINIT, A_MALLOC, A_FREE, A_PRINTF = 0x9E518, 0xADAC8, 0x53578, 0x53580, 0x53584
+A_TICKS, A_RTC, A_HT_CMD, A_LED_LEVEL = 0x5DD10, 0x4519C, 0x49E4C, 0x1FC3C
+A_GPIO_SET, A_MSG_POST, A_QSEND = 0x43224, 0x42C, 0x5CFE0
+A_PLAY_BODY, A_SEG, A_VBUS, A_USB_OFF = 0x2295C, 0x21250, 0x1F364, 0xBDE60
+A_EJECT, A_REBOOT, A_POWER_OFF, A_FS_TAKE, A_FS_GIVE = 0xBE230, 0x1FB3C, 0x26140, 0xA0CDC, 0xA0CF8
+A_CS_ENTER, A_CS_EXIT, A_DELAY, A_CSW = 0x5C7B0, 0x5C7D0, 0x5E03C, 0x4D800
+A_LUN_REG, A_START_STOP, A_UART_PUT = 0x4E89C, 0x4E708, 0x48D44
+A_PRINT_BUF, GAP, GAP_END = 0x124438, 0xE6828, 0xE8000
+
+# stock variables
+B_CARD_OK, B_MOUNT_FAIL, B_USB_POLL_EN = 0x121965, 0x1216ED, 0x131F88
+B_MODE, B_USB_STATE, W_APP_STATE = 0x1216D6, 0x12162D, 0x132854
+B_CAPTURE_BUSY, B_REC_FLAGS, B_F_HELD = 0x1218E6, 0x132A83, 0x12158F
+B_CARD_TYPE = 0x121825  # read by card id 0x26118, 0xff = no card
+LUN0, H_LUN0, MSC_CTX, SD_OPS = 0x12426C, 0x124278, 0x1350A0, 0xE0818
+CUR_TCB, PERIPH_TCB, APQ_PTR, USBQ_PTR = 0x126B34, 0x19296C, 0x1329DC, 0x123D34
+GPIO = 0xC0000000
+TCB = {"periph": 0x00A00000, "ap": 0x00A00100, "usb": 0x00A00200, "storage": 0x00A00300}
+APQ_OBJ, USBQ_H = 0x00A01000, 0x00A02000
+
+O_READ_ONLY, O_READ_WRITE, O_CREATE_TRUNC = 0x000, 0x001, 0x601
+
+
+def arm_bl(at, target):
+    return struct.pack("<I", 0xEB000000 | (((target - (at + 8)) >> 2) & 0xFFFFFF))
+
+
+class EmuError(Exception):
+    pass
+
+
+class Card:
+    def __init__(self, files=None):
+        self.f = {k.upper(): bytearray(v if isinstance(v, bytes) else v.encode()) for k, v in (files or {}).items()}
+
+    def get(self, name):
+        return bytes(self.f.get(name.upper(), b""))
+
+    def names(self):
+        return sorted(self.f)
+
+
+class Machine:
+    def __init__(self, image, symfile, card=None, present=True):
+        d = open(image, "rb").read()
+        assert len(d) in (1841152, 0x200000), len(d)
+        loadlen = struct.unpack_from("<I", d, 0x1002E)[0] * 0x200 - 0x200
+        self.raw = d
+        self.sym = {}
+        for line in open(symfile):
+            a, _, name = line.split()
+            self.sym[name] = int(a, 16)
+        self.card = card if card is not None else Card()
+        self.trace = []
+        self.violations = []  # model rules the payload broke: file I/O on a dead card, etc.
+        self.ticks = 1000
+        self.fds = {}
+        self.next_fd = 3
+        self.heap = HEAP
+        self.live = {}  # malloc'd block -> size
+        self.rtc = [7, 42, 13, 11]  # sec min hour day
+        self.unmount_ret = 0
+        self.mount_ret = 0
+        self.unlink_ret = 0  # nonzero: unlink fails with it, as on a write-protected card
+        self.qsend_ret = 1  # pdPASS
+        self.sd_up = present  # SD driver inited; eject and MSC uninit take it down
+        self.mounted = present
+        self.stack_low = STACK
+        self.hits = {}
+        self.sp_at = {}  # sp at the last entry of each watched address
+        self.call_sp = {}  # lowest sp at entry to each modelled stock call
+        self.injections = {}
+        self.uc = uc = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+        uc.mem_map(0, 0x1000000)
+        uc.mem_write(0, d[B : B + loadlen])
+        uc.mem_map(GPIO, 0x100000)
+        uc.mem_write(RET, bytes.fromhex("feffffea"))
+        uc.mem_write(TRAMP, bytes.fromhex("feffffea"))
+        uc.reg_write(UC_ARM_REG_CPSR, CPSR_TASK)
+        uc.hook_add(UC_HOOK_MEM_WRITE, self._stack_write, begin=STACK_LO, end=STACK + 0x100)
+        uc.hook_add(UC_HOOK_CODE, self._tramp, begin=TRAMP, end=TRAMP + 4)
+        self.stubs = {}
+        # void stock calls: record and return
+        for a, n in (
+            (A_HT_CMD, "ht_cmd"),
+            (A_LED_LEVEL, "led_level"),
+            (A_SEG, "seg_refresh"),
+            (A_VBUS, "vbus"),
+            (A_USB_OFF, "usb_off"),
+            (A_POWER_OFF, "power_off"),
+            (A_FS_TAKE, "fs_take"),
+            (A_FS_GIVE, "fs_give"),
+            (A_CS_ENTER, "cs_enter"),
+            (A_CS_EXIT, "cs_exit"),
+            (A_REBOOT, "reboot"),
+            (A_CSW, "csw"),
+            (A_UART_PUT, "uart"),
+        ):
+            self.stub(a, n, lambda m, *r: None)
+        self.stub(A_OPEN, "open", self.f_open)
+        self.stub(A_READ, "read", self.f_read)
+        self.stub(A_WRITE, "write", self.f_write)
+        self.stub(A_LSEEK, "lseek", self.f_lseek)
+        self.stub(A_CLOSE, "close", self.f_close)
+        self.stub(A_UNLINK, "unlink", self.f_unlink)
+        self.stub(A_STAT, "stat", self.f_stat)
+        self.stub(A_RENAME, "rename", self.f_rename)
+        self.stub(A_FLUSH, "flush", self.f_flush)
+        self.stub(A_MOUNT, "mount", self.f_mount)
+        self.stub(A_UNMOUNT, "unmount", self.f_unmount)
+        self.stub(A_SDINIT, "sd_init", self.f_sd_init)
+        self.stub(A_MALLOC, "malloc", self.f_malloc)
+        self.stub(A_FREE, "free", self.f_free)
+        self.stub(A_TICKS, "ticks", lambda m, *a: self.ticks)
+        self.stub(A_DELAY, "delay", self.f_delay)
+        self.stub(A_RTC, "rtc", self.f_rtc)
+        self.stub(A_MSG_POST, "apq", self.f_msg_post)
+        self.stub(A_QSEND, "qsend", self.f_qsend)
+        self.stub(A_EJECT, "eject", self.f_eject)
+        # play_effect past its entry push (0x2295c): open the amp the way the body does
+        # (gpio_set(44, 1) at 0x22a10, through the L1 gate), then return 0 like its
+        # success path, popping the frame the entry pushed.
+        body = A_PLAY_BODY
+        code = bytes.fromhex("2c00a0e30110a0e3") + arm_bl(body + 8, A_GPIO_SET) + bytes.fromhex("0000a0e3f080bde8")
+        self.stub(body, "play", lambda m, *r: None, code=code)
+        self.watch(A_PRINTF, "printf")
+        for name in (
+            "logcap",
+            "v5_tick",
+            "load_settings",
+            "act_long_select",
+            "act_sound_gate",
+            "v5_usb_plugin",
+            "v5_usb_unplug",
+            "v5_usb_tick",
+            "v5_eject_cb",
+        ):
+            self.watch(self.sym[name] & ~1, name)
+        # boot state: the stock mount sets the card flag at 0x3d9cc before the
+        # VERSION.TXT writer (and the SET hook) runs; queues exist from InitTask
+        self.poke32(PERIPH_TCB, TCB["periph"])
+        self.poke32(APQ_PTR, APQ_OBJ)
+        self.poke32(USBQ_PTR, USBQ_H)
+        self.poke8(B_CARD_OK, 1 if present else 0)
+        self.poke8(B_CARD_TYPE, 1 if present else 0xFF)
+        self.task("periph")
+
+    # ---- stubs and watches ----
+    def stub(self, addr, name, fn, code=BX_LR):
+        self.uc.mem_write(addr, code)
+        self.stubs[addr] = name
+        self.uc.hook_add(UC_HOOK_CODE, self._at(name, fn), begin=addr, end=addr)
+
+    def _at(self, name, fn):
+        def cb(uc, a, size, _):
+            r = [uc.reg_read(x) for x in REGS[:4]]
+            sp = uc.reg_read(UC_ARM_REG_SP)
+            self.call_sp[name] = min(sp, self.call_sp.get(name, sp))
+            self.trace.append((name, *r))
+            out = fn(self, *r)
+            if out is not None:
+                uc.reg_write(UC_ARM_REG_R0, out & 0xFFFFFFFF)
+
+        return cb
+
+    def watch(self, addr, name):
+        """Record entries to addr without changing what runs there."""
+        self.hits[name] = 0
+
+        def cb(uc, a, size, _):
+            self.hits[name] += 1
+            self.sp_at[name] = uc.reg_read(UC_ARM_REG_SP)
+            self.trace.append((name, *[uc.reg_read(x) for x in REGS[:4]]))
+
+        self.uc.hook_add(UC_HOOK_CODE, cb, begin=addr, end=addr)
+
+    def _stack_write(self, uc, access, addr, size, value, _):
+        if addr < self.stack_low:
+            self.stack_low = addr
+
+    def watch_writes(self, lo, hi):
+        """Every store into [lo, hi) from now on: (addr, size, value, pc)."""
+        log = []
+
+        def cb(uc, access, addr, size, value, _):
+            log.append((addr, size, value & ((1 << (8 * size)) - 1), uc.reg_read(UC_ARM_REG_PC)))
+
+        self.uc.hook_add(UC_HOOK_MEM_WRITE, cb, begin=lo, end=hi - 1)
+        return log
+
+    def task(self, name):
+        """Run what follows as the peripheral, AP, USB or storage task."""
+        self.poke32(CUR_TCB, TCB[name])
+
+    # ---- running code ----
+    def _run(self, start, until, args, sp, lr, regs, limit):
+        uc = self.uc
+        for reg, v in zip(REGS, args, strict=False):
+            uc.reg_write(reg, v & 0xFFFFFFFF)
+        for reg, v in (regs or {}).items():
+            uc.reg_write(reg, v & 0xFFFFFFFF)
+        uc.reg_write(UC_ARM_REG_SP, sp)
+        uc.reg_write(UC_ARM_REG_LR, lr)
+        cpsr = uc.reg_read(UC_ARM_REG_CPSR)
+        uc.reg_write(UC_ARM_REG_CPSR, cpsr | 0x20 if start & 1 else cpsr & ~0x20)
+        irq = uc.reg_read(UC_ARM_REG_CPSR) & 0xC0
+        # Unicorn picks the decode state from the address bit 0, not from CPSR:
+        # masking it here silently runs Thumb code as ARM.
+        try:
+            uc.emu_start(start, until, count=limit)
+        except UcError as e:
+            pc = uc.reg_read(UC_ARM_REG_PC)
+            raise EmuError(f"{e} at pc {pc:#x}, last calls {self.names()[-6:]}") from None
+        pc = uc.reg_read(UC_ARM_REG_PC)
+        if pc != until & ~1:
+            why = f"returned to lr {lr:#x}" if pc == lr & ~1 and lr != until else f"instruction limit {limit}"
+            raise EmuError(f"stopped at {pc:#x}, not {until:#x} ({why})")
+        if uc.reg_read(UC_ARM_REG_CPSR) & 0xC0 != irq:
+            self.violations.append(f"IRQ mask {irq:#x} -> {uc.reg_read(UC_ARM_REG_CPSR) & 0xC0:#x} after {start:#x}")
+        return uc.reg_read(UC_ARM_REG_R0)
+
+    def call(self, name, *args, sp=STACK, limit=3_000_000):
+        return self._run(self.sym[name], RET, args, sp, RET, None, limit)
+
+    def call_arm(self, addr, *args, until=RET, sp=STACK, lr=RET, regs=None, limit=3_000_000):
+        return self._run(addr, until, args, sp, lr, regs, limit)
+
+    def reg(self, r):
+        return self.uc.reg_read(r)
+
+    def inject(self, at, target, args=(), regs=None, sp_gap=0x40, before=None, after=None):
+        """The first time execution reaches `at`, run `target(args)` as if an interrupt
+        called it there, on the same stack below sp, then resume at `at` with every
+        register as it was. `before`/`after` run in Python around the nested call."""
+        st = {"armed": True}
+
+        def cb(uc, a, size, _):
+            if not st["armed"]:
+                return
+            st["armed"] = False
+            assert "resume" not in self.injections, "one injection at a time"
+            saved = {r: uc.reg_read(r) for r in REGS + (UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_CPSR)}
+            thumb = saved[UC_ARM_REG_CPSR] & 0x20
+            self.injections["resume"] = (at | (1 if thumb else 0), saved, after)
+            sp = (saved[UC_ARM_REG_SP] - sp_gap) & ~7
+            if before:
+                sp = before(self, sp)
+            for reg, v in zip(REGS, args, strict=False):
+                uc.reg_write(reg, v & 0xFFFFFFFF)
+            for reg, v in (regs or {}).items():
+                uc.reg_write(reg, v & 0xFFFFFFFF)
+            uc.reg_write(UC_ARM_REG_SP, sp)
+            uc.reg_write(UC_ARM_REG_LR, TRAMP)
+            cpsr = saved[UC_ARM_REG_CPSR]
+            uc.reg_write(UC_ARM_REG_CPSR, cpsr | 0x20 if target & 1 else cpsr & ~0x20)
+            uc.reg_write(UC_ARM_REG_PC, target)
+
+        self.uc.hook_add(UC_HOOK_CODE, cb, begin=at & ~1, end=at & ~1)
+
+    def _tramp(self, uc, a, size, _):
+        pc, saved, after = self.injections.pop("resume")
+        if after:
+            after(self)
+        for r, v in saved.items():
+            uc.reg_write(r, v)
+        uc.reg_write(UC_ARM_REG_PC, pc)
+
+    # ---- memory ----
+    def cstr(self, addr, maxlen=600):
+        b = bytes(self.uc.mem_read(addr, maxlen))
+        return b[: b.index(0)].decode("latin1") if 0 in b else b.decode("latin1")
+
+    def put(self, addr, data):
+        self.uc.mem_write(addr, bytes(data))
+
+    def alloc(self, n=256):
+        a = self.heap
+        self.heap += (n + 15) & ~15
+        return a
+
+    def u8(self, addr):
+        return bytes(self.uc.mem_read(addr, 1))[0]
+
+    def u16(self, addr):
+        return struct.unpack("<H", self.uc.mem_read(addr, 2))[0]
+
+    def u32(self, addr):
+        return struct.unpack("<I", self.uc.mem_read(addr, 4))[0]
+
+    def poke8(self, addr, v):
+        self.uc.mem_write(addr, bytes([v & 0xFF]))
+
+    def poke16(self, addr, v):
+        self.uc.mem_write(addr, struct.pack("<H", v & 0xFFFF))
+
+    def poke32(self, addr, v):
+        self.uc.mem_write(addr, struct.pack("<I", v & 0xFFFFFFFF))
+
+    def strp(self, s):
+        a = self.alloc(len(s) + 1)
+        self.put(a, s.encode() + b"\0")
+        return a
+
+    def names(self):
+        return [t[0] for t in self.trace]
+
+    def calls(self, name):
+        return [t for t in self.trace if t[0] == name]
+
+    def reset(self):
+        self.trace = []
+        self.violations = []
+
+    def ring(self):
+        """What logcap and v5_log have queued and not yet flushed."""
+        return self.call("log_pending")
+
+    # ---- GPIO MMIO, 16 pins per 0x20 bank: +0 input, +4 output ----
+    def gpio(self, pin):
+        return (self.u32(GPIO + (pin >> 4) * 0x20 + 4) >> (pin & 0xF)) & 1
+
+    def gpio_input(self, pin, v):
+        a = GPIO + (pin >> 4) * 0x20
+        w = self.u32(a) & ~(1 << (pin & 0xF))
+        self.poke32(a, w | ((v & 1) << (pin & 0xF)))
+
+    # ---- stock models ----
+    def _name(self, p):
+        s = self.cstr(p).upper().replace("\\", "/")
+        if s.startswith("G:/"):
+            s = s[3:]
+        return s.strip("/")
+
+    def _card_live(self, what):
+        if self.sd_up and self.mounted:
+            return True
+        self.violations.append(f"{what} while the card is {'unmounted' if self.sd_up else 'uninited (SD down)'}")
+        return False
+
+    # open 0x9e434(path, flags): fd >= 0, -1 on failure
+    def f_open(self, m, path, flags, *a):
+        name = self._name(path)
+        if not self._card_live(f"open {name}"):
+            return -1
+        if flags in (O_READ_ONLY, O_READ_WRITE):
+            if name not in self.card.f:
+                return -1
+        elif flags == O_CREATE_TRUNC:
+            self.card.f[name] = bytearray()
+        else:
+            self.violations.append(f"open {name} with flags {flags:#x}")
+            return -1
+        fd = self.next_fd
+        self.next_fd += 1
+        self.fds[fd] = [name, 0]
+        return fd
+
+    # read 0x9e4a8(fd, buf, n): bytes read, writes only those
+    def f_read(self, m, fd, buf, n, *a):
+        e = self.fds.get(fd)
+        if not e:
+            return -1
+        data = bytes(self.card.f[e[0]][e[1] : e[1] + n])
+        self.put(buf, data)
+        e[1] += len(data)
+        return len(data)
+
+    def f_write(self, m, fd, buf, n, *a):
+        e = self.fds.get(fd)
+        if not e:
+            return -1
+        data = bytes(self.uc.mem_read(buf, n))
+        f = self.card.f[e[0]]
+        if e[1] + n > len(f):
+            f.extend(b"\0" * (e[1] + n - len(f)))
+        f[e[1] : e[1] + n] = data
+        e[1] += n
+        return n
+
+    def f_lseek(self, m, fd, off, whence, *a):
+        e = self.fds.get(fd)
+        if not e:
+            return -1
+        if off >= 0x80000000:
+            off -= 0x100000000
+        base = {0: 0, 1: e[1], 2: len(self.card.f[e[0]])}[whence & 3]
+        e[1] = max(0, base + off)
+        return e[1]
+
+    def f_close(self, m, fd, *a):
+        return 0 if self.fds.pop(fd, None) else -1
+
+    def f_unlink(self, m, path, *a):
+        name = self._name(path)
+        if not self._card_live(f"unlink {name}"):
+            return -1
+        if self.unlink_ret:
+            return self.unlink_ret
+        if name in self.card.f:
+            del self.card.f[name]
+            return 0
+        return -1
+
+    # stat 0x9e6c0(path, st): attr u16 at +0, size u64 at +8 with STRD (8-aligned
+    # buffer or the store faults on ARMv5TE), time u32 at +0x10; 0 or -1
+    def f_stat(self, m, path, st, *a):
+        name = self._name(path)
+        if not self._card_live(f"stat {name}"):
+            return -1
+        if name not in self.card.f:
+            return -1
+        if st & 7:
+            self.violations.append(f"stat buffer {st:#x} not 8-aligned (STRD at 0x9e730)")
+        self.put(st, struct.pack("<HHIQI", 0x20, 0, 0, len(self.card.f[name]), 0x4D8E0000))
+        return 0
+
+    # rename 0x9e518(old, new): 0 or -1
+    def f_rename(self, m, old, new, *a):
+        o, n = self._name(old), self._name(new)
+        if not self._card_live(f"rename {o}"):
+            return -1
+        if o not in self.card.f or n in self.card.f:
+            return -1
+        self.card.f[n] = self.card.f.pop(o)
+        return 0
+
+    def f_flush(self, m, drive, *a):
+        if drive == 6:
+            self._card_live("flush")
+
+    # mount 0x9dd78(drive): 0 or -1; needs the SD driver up
+    def f_mount(self, m, drive, *a):
+        if not self.sd_up:
+            self.violations.append("mount with the SD driver down")
+            return -1
+        if self.mount_ret == 0:
+            self.mounted = True
+        return self.mount_ret
+
+    # unmount 0x9ddbc(drive): -1 (0xffff sign-extended at 0x9dde0) if a file is open
+    def f_unmount(self, m, drive, *a):
+        if self.fds or self.unmount_ret:
+            return -1
+        self.mounted = False
+        return 0
+
+    def f_sd_init(self, m, dev, *a):
+        self.sd_up = True
+        return 0
+
+    def f_malloc(self, m, n, *a):
+        a = self.heap
+        self.heap += (max(n, 1) + 15) & ~15
+        self.live[a] = n
+        return a
+
+    def f_free(self, m, p, *a):
+        if p and self.live.pop(p, None) is None:
+            self.violations.append(f"free of {p:#x}, not a live block")
+
+    def f_delay(self, m, n, *a):
+        self.ticks += n
+
+    def f_rtc(self, m, out, *a):
+        for i, v in enumerate(self.rtc):
+            self.poke32(out + i * 4, v)
+        return 0
+
+    # msg post 0x42c(q, msg, item, size, [sp] urgent): 0 or -1 (0x4cc, 0x4ec)
+    def f_msg_post(self, m, q, msg, item, size):
+        sp = self.uc.reg_read(UC_ARM_REG_SP)
+        urgent = self.u32(sp)
+        words = struct.unpack("<2I", bytes(self.uc.mem_read(item, 8))) if item else (0, 0)
+        self.trace[-1] = ("apq", q, msg, words[0], words[1], size, urgent)
+        return 0
+
+    # xQueueGenericSend 0x5cfe0(q, item, ticks, pos): 1 = pdPASS
+    def f_qsend(self, m, q, item, ticks, pos):
+        self.trace[-1] = ("qsend", q, self.u32(item), ticks, pos)
+        return self.qsend_ret
+
+    # SD LUN eject callback 0xbe230: SD driver uninit (0xb37a0), 0
+    def f_eject(self, m, lun, *a):
+        self.sd_up = False
+        self.mounted = False
+        return 0
+
+
+class Harness:
+    def __init__(self, m):
+        self.m = m
+        self.fails = []
+        self.checks = 0
+        self.section = ""
+
+    def ok(self, cond, what, detail=""):
+        self.checks += 1
+        if cond:
+            print(f"  ok   {what}")
+        else:
+            self.fails.append(f"[{self.section}] {what} {detail}".strip())
+            print(f"  FAIL {what} {detail}")
+        return cond
+
+    def eq(self, got, want, what):
+        return self.ok(got == want, what, f"(got {got!r}, want {want!r})")
+
+    def has(self, needle, what=None, m=None):
+        blob = (m or self.m).card.get("LOG.TXT").decode("latin1")
+        good = needle in blob
+        return self.ok(good, what or f"LOG.TXT has {needle!r}", "" if good else f"\n    LOG.TXT: {blob[-600:]!r}")
+
+    def called(self, name, what=None, m=None):
+        return self.ok(name in (m or self.m).names(), what or f"{name} called")
+
+    def not_called(self, name, what=None, m=None):
+        return self.ok(name not in (m or self.m).names(), what or f"{name} not called")
+
+    def clean(self, m, what="no model violations"):
+        return self.ok(not m.violations, what, f"({m.violations})")
+
+    def report(self):
+        print(f"\n{self.checks - len(self.fails)}/{self.checks} checks passed")
+        for f in self.fails:
+            print(f"  FAIL {f}")
+        return 1 if self.fails else 0

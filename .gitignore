@@ -1,0 +1,9 @@
+build/
+build-canary/
+obj/
+obj-canary/
+.venv/
+__pycache__/
+*.BIN
+*.bin
+dist/
