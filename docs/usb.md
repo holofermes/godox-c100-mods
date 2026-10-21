@@ -87,6 +87,31 @@ tested on the camera.
 - In Photo this is the same path as `usb_photo=webcam`, also not tested on the camera. Metering
   is a sub-mode of the photo state (0x2ebe4), so the reboot is not refused there [inferred].
 
+## One boot as the drive
+
+`drive` restarts the camera as the USB drive whatever the switch and `C100.TXT` say, for that
+boot only. It comes from `CMD.TXT` or from the PC while the camera is the webcam (README,
+docs/webcam.md). Not yet tested on the camera.
+
+- The same path as `webcam` without minutes (`src/webcam.c`): the checks `reboot` makes, then
+  `DRIVE.ONE` in the card root, flushed, then the reboot; deleted again if the reboot fails with
+  the card still mounted.
+- The next boot deletes `DRIVE.ONE` first and acts only if the delete worked: the drive on every
+  switch position, no timer. Its contents are not read; one over 16 B is deleted and ignored, one
+  that cannot be deleted gives a normal boot.
+- Both markers on the card: both are deleted and the drive wins; the webcam boot and its timer
+  are dropped (`webcam: ignored, drive boot`). The drive is the way back to the card from a PC,
+  and it never restarts by itself.
+- While the webcam streams the reboot is not refused [read]. The app stays in the photo or video
+  state: its state word 0x13288c has one writer, the state dispatcher 0x29d64, and no webcam
+  message changes it. Streaming sets neither the capture nor the record flags, and the card stays
+  the camera's, so the unmount works. The 0x7007 handlers (video 0x370a4, photo 0x2ec1c) wait for
+  nothing in the USB task. Whether the drive comes up after a reboot from a running stream, with
+  the cable still in, is for the camera test.
+- `LOG.TXT`: `drive` and `reboot` from the command, after `xu: drive` when it came from the PC;
+  `drive: boot`; `drive: rm fail`, `drive: bad file`, `drive: write fail`, `drive: marker
+  removed`.
+
 ## Audio
 
 The webcam descriptor includes a UAC1 microphone (mono, 16-bit, 16 kHz, iso EP 0x87, alt

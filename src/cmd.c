@@ -1,8 +1,10 @@
 #include "v5.h"
 
-/* CMD.TXT: one command per line, results go to LOG.TXT when log=on.
+/* Command lines, from CMD.TXT (cmd_run, one per line) or from the webcam's
+ * extension unit (tick.c, one line). Results go to LOG.TXT when log=on.
  *   reboot                  RTC-alarm reboot after the log is flushed
  *   webcam [MIN]            reboot once as the webcam, back MIN minutes later (webcam.c)
+ *   drive                   reboot once as the USB drive (webcam.c)
  *   display on|off, led on|off, sound on|off
  *   set KEY=VALUE           same as a C100.TXT line, applied now
  */
@@ -25,7 +27,8 @@ static int split(char *s, char **tok)
 	return n;
 }
 
-static void run_line(char *line)
+/* one line, NUL-terminated, no '\n'; modified in place */
+void cmd_line(char *line)
 {
 	char *t[MAXTOK];
 	int n;
@@ -38,6 +41,8 @@ static void run_line(char *line)
 		act_reboot();
 	} else if (v5_streq(t[0], "webcam") && n <= 2 && (n == 1 || webcam_min(t[1]) >= 0)) {
 		webcam_cmd(n == 2 ? webcam_min(t[1]) : 0);
+	} else if (v5_streq(t[0], "drive") && n == 1) {
+		drive_cmd();
 	} else if ((v5_streq(t[0], "display") || v5_streq(t[0], "led") ||
 		    v5_streq(t[0], "sound")) && n == 2) {
 		char kv[32];
@@ -62,6 +67,6 @@ void cmd_run(char *text, u32 len)
 		while (i < len && text[i] != '\n')
 			i++;
 		text[i++] = 0;
-		run_line(line);
+		cmd_line(line);
 	}
 }

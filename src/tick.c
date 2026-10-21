@@ -1,5 +1,6 @@
 #include "v5.h"
 #include "fw.h"
+#include "xu.h"
 
 #define CMD_MAX 2048
 #define CMD_EVERY 3000   /* ms */
@@ -58,19 +59,24 @@ static int remount(void)
 	return 1;
 }
 
+/* a firmware update on the card flashes at the next boot; no command runs over it */
+static int update_pending(void)
+{
+	s32 fd = fw_open(P_FW, O_READ_ONLY);
+
+	if (fd < 0)
+		return 0;
+	fw_close(fd);
+	return 1;
+}
+
 static void cmd_poll(void)
 {
 	char *text;
-	s32 fd, n;
+	s32 n;
 
-	if (!fs_ready())
+	if (!fs_ready() || update_pending())
 		return;
-	/* a pending update flashes at the next boot; do not run commands over it */
-	fd = fw_open(P_FW, O_READ_ONLY);
-	if (fd >= 0) {
-		fw_close(fd);
-		return;
-	}
 	n = fs_read(P_CMD, &text, CMD_MAX);
 	if (!text && !n)
 		return;
@@ -92,6 +98,37 @@ static void cmd_poll(void)
 	fw_free(text);
 }
 
+/* The line a host sent through the webcam's extension unit (xu.S), run like a
+ * CMD.TXT line. Taken once the card is the camera's, so the update check and
+ * the commands that write to the card see it; until then it waits in the
+ * mailbox and the host sees it there (GET_CUR). With an update on the card it
+ * is taken and dropped. */
+static void xu_poll(void)
+{
+	char line[XU_LEN + 1];
+	u32 c, i;
+
+	if (!xu_full || !fs_ready())
+		return;
+	c = v5_irq_save();
+	for (i = 0; i < XU_LEN; i++) {
+		line[i] = xu_box[i];
+		xu_box[i] = 0;
+	}
+	xu_full = 0;
+	v5_irq_restore(c);
+	line[XU_LEN] = 0;
+	for (i = 0; line[i]; i++)
+		if (line[i] == '\r' || line[i] == '\n')
+			line[i] = 0;
+	if (update_pending()) {
+		v5_log("xu: %s not run, update on the card", line);
+		return;
+	}
+	v5_log("xu: %s", line);
+	cmd_line(line);
+}
+
 /* From the 0x22360 stub in the peripheral task (4 KB stack), every ~250 ms,
  * after the stub ran fw_seg_refresh. */
 void v5_tick(void)
@@ -101,6 +138,7 @@ void v5_tick(void)
 		st.next_cmd_ms = v5_ms() + CMD_EVERY;
 		cmd_poll();
 	}
+	xu_poll();
 
 	/* both off unless both are already off */
 	if (st.toggle_req) {

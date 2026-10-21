@@ -48,11 +48,12 @@ No 4:3 sizes: the stock code letterboxes or squashes them [read].
 How [read]:
 
 - Stock's config descriptor (0xe39d0, 0x142 B) has no room for more frames: the device
-  descriptor follows at 0xe3b14. `v6_cfg` in `src/v6.S` is a copy in the RAM gap, 512 B, with
-  frames 2..6 after frame 1; `tools/patch.py` checks it byte for byte against stock's. The two
-  words that held 0xe39d0 point at the copy: register_desc(1) in usb_uvc_init (pool 0x3ef00),
-  and the write of the alt-3 wMaxPacketSize at 0x52370 (pool 0x52488, + 0xbe, where that field
-  moved). GET_DESCRIPTOR (0x508b4) rewrites byte 1 of it, so it has to be in RAM.
+  descriptor follows at 0xe3b14. `v6_cfg` in `src/v6.S` is a copy in the RAM gap, 538 B, with
+  frames 2..6 after frame 1 and the extension unit (below); `tools/patch.py` checks it byte for
+  byte against stock's. The two words that held 0xe39d0 point at the copy: register_desc(1) in
+  usb_uvc_init (pool 0x3ef00), and the write of the alt-3 wMaxPacketSize at 0x52370 (pool
+  0x52488, + 0xd8, where that field moved). GET_DESCRIPTOR (0x508b4) rewrites byte 1 of it, so it
+  has to be in RAM. In UVC mode nothing else reads the descriptor [read].
 - Probe/commit (0x527d4) accepts bFrameIndex 0..6, stock only 1. The SET_CUR handler copies the
   host's request to 0xe3b2c before it checks it.
 - On stream start, sensor_on(0x106) builds the geometry in 0xf004. At 0xf510 `v6_size` gives the
@@ -93,6 +94,52 @@ the stream then work on the same encoder without a lock [inferred].
 Fix (`v6_rec_gate`): the record start branch at 0x35898 goes through the same check; while the
 host streams, record start returns as if nothing happened [read]. The check is on record start
 only: a recording started before the PC opens the stream can still be stopped during it [read].
+
+## Extension unit
+
+A PC sends `CMD.TXT` lines to the camera through a UVC extension unit (`tools/c100cmd.py`,
+README). Not yet tested on the camera.
+
+| | |
+| --- | --- |
+| unit ID | 6, between the processing unit (5) and the output terminal (3) |
+| GUID | `{21118ec3-89d6-4bb3-8015-7611dd2b1f87}` |
+| control | selector 1, 32 B: one line, NUL-padded, printable ASCII |
+| GET_INFO | 0x03: GET and SET |
+| GET_LEN | 32 |
+| GET_CUR | the line still waiting to be run; 32 zeros once the camera took it, or before any |
+| SET_CUR | a line, taken when nothing waits and the patch is loaded |
+
+Any other request (GET_MIN, GET_MAX, GET_RES, GET_DEF, others), another selector or a wLength
+other than the size stalls EP0 with a request error code, as stock does for its own controls: 6
+for a selector, 7 for a request or length. SET_CUR is also refused with 2 while the patch is not
+loaded (no card, a failed overlay load) and with 1 while the last line still waits. Linux turns
+6 and 7 into EIO, 2 into EACCES (EILSEQ on 6.1), 1 into EBUSY.
+
+How [read]:
+
+- Linux reaches an extension unit only on the chain it walks back from the output terminal
+  (drivers/media/usb/uvc/uvc_driver.c, checked on v7.3, v6.1 to v6.12 and the Raspberry Pi
+  6.1 to 6.18 branches), hence its place in the chain. It sends nothing to it by itself; the first
+  query of a control sends GET_LEN, then GET_INFO.
+- The requests arrive in the setup handler 0x507ac that usb_uvc_init installs, run by the USB
+  device task. Three branches send wIndex 0x0600 (unit 6, interface 0) to `src/xu.S` in the RAM
+  gap: 0x50980 (class GET), 0x507f0 (class SET), 0x52570 (the SET_CUR data stage in 0x524b8).
+  Everything else runs as stock. The answers go out through stock's EP0 send 0x509d4, the stalls
+  through 0x50930 and the error code at 0x12440a, which the host reads back with GET_CUR on unit
+  0 (0x51098).
+- SET_CUR copies the line to a 32 B mailbox in the gap and sets a flag; nothing else happens in
+  the USB task. The patch's tick (peripheral task, about every 250 ms) takes the line once the
+  card is the camera's, zeroes the mailbox, logs `xu: <line>` and runs it as a `CMD.TXT` line. A
+  line that arrives while a firmware update is on the card is dropped (`xu: <line> not run, update
+  on the card`).
+- Being in the gap, it answers without the overlay; without it nothing takes a line, so SET_CUR
+  is refused.
+
+In the emulator, through the stock handlers: every request above, the refusals, and 1,875 other
+class requests on interfaces 0 and 1 answered as on the image without the patch, among them the
+processing unit's brightness, stock's only control (stock reads its SET_CUR value big-endian,
+0x527f0).
 
 ## Using it
 

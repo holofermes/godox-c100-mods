@@ -10,6 +10,7 @@ import itertools
 import os
 import struct
 import sys
+import uuid
 import zlib
 
 base, gapf, ovlf, symf, dst = sys.argv[1:6]
@@ -113,6 +114,15 @@ V6_HOOKS = [
     (0x35898, "5c00000a", "b", "v6_rec_gate", "record start: beq kept, gated while streaming"),
     (0xF510, "be00d4e1", "bl", "v6_size", "APMode 0x106 second path: ldrh r0,[r4,#0xe] -> the committed frame size"),
 ]
+# The extension unit's EP0 requests (src/xu.S, docs/webcam.md), in the handlers usb_uvc_init
+# installs (0x52a90); the USB task runs them on a host request in webcam mode only. Each stub
+# takes wIndex 0x0600 (unit 6, interface 0) and otherwise runs the displaced instruction. Not in
+# the canary.
+XU_HOOKS = [
+    (0x507F0, "3430d4e5", "b", "xu_out", "UVC class OUT setup: ldrb r3,[r4,#0x34] -> the XU's SET_CUR checks"),
+    (0x50980, "b423d4e1", "b", "xu_in", "UVC class IN setup: ldrh r2,[r4,#0x34] -> the XU's GET requests"),
+    (0x52570, "010056e3", "b", "xu_data", "SET_CUR data stage: cmp r6,#1 -> the XU's line into the mailbox"),
+]
 # APMode 0x106's target 1920x1080 (full sensor, no crop); [0xf894] is a stock literal 0x438,
 # 1080 has no ARM immediate. Then the frame sizes: the second path gets the host's frame
 # (v6_size, r0 = W and r3 = H, so the second ldrh goes), the display size follows the second
@@ -128,13 +138,18 @@ V6_DATA = [
 ]
 
 # The UVC config descriptor (src/v6.S v6_cfg). Stock's at 0xe39d0 has one MJPEG frame and the
-# device descriptor right after it. v6_cfg must be stock's bytes with frame 1 at 1920x1080 and
-# frames 2.. inserted after frame 1, and nothing else changed. Two words point at stock's copy:
-# register_desc(1) in usb_uvc_init (pool 0x3ef00, loaded at 0x3edc8) and the L2 event that
-# writes the alt-3 wMaxPacketSize 0x0400 at cfg+0xd4 (pool 0x52488, 0x52364..0x52374); both
-# move to v6_cfg, the second by how far that field moved.
+# device descriptor right after it. v6_cfg must be stock's bytes with frame 1 at 1920x1080,
+# frames 2.. inserted after frame 1, and the extension unit inserted after the last
+# class-specific VideoControl descriptor and put on the chain (output terminal's source = the
+# extension unit, whose source is the processing unit), and nothing else changed. Two words
+# point at stock's copy: register_desc(1) in usb_uvc_init (pool 0x3ef00, loaded at 0x3edc8) and
+# the L2 event that writes the alt-3 wMaxPacketSize 0x0400 at cfg+0xd4 (pool 0x52488,
+# 0x52364..0x52374); both move to v6_cfg, the second by how far that field moved.
 V6_CFG = 0xE39D0
 V6_FRAMES = [(1920, 1080), (1280, 720), (640, 360), (320, 180), (256, 144), (128, 72)]
+# the extension unit, as src/xu.h; the v6_cfg check below fails the build if they differ
+XU_ID, XU_SEL = 6, 1
+XU_GUID = uuid.UUID("21118ec3-89d6-4bb3-8015-7611dd2b1f87")
 V6_L2 = (0x52364 + B, "1c319fe50010a0e30420a0e3d410c3e5d520c3e5", 0xD4)  # ldr r3,=cfg; strb at +0xd4, +0xd5
 
 
@@ -154,9 +169,20 @@ def descs(b):
 def v6_cfg_want(img):
     n = struct.unpack_from("<H", img, V6_CFG + B + 2)[0]
     old = bytes(img[V6_CFG + B : V6_CFG + B + n])
-    vs = [(o, s) for o, _, t, s, c in descs(old) if t == 0x24 and c == (0x0E, 2)]  # video streaming
+    walk = descs(old)
+    vc = [(o, s) for o, _, t, s, c in walk if t == 0x24 and c == (0x0E, 1)]  # video control
+    vs = [(o, s) for o, _, t, s, c in walk if t == 0x24 and c == (0x0E, 2)]  # video streaming
+    vhdr, ot, pu = ([o for o, s in vc if s == k] for k in (1, 3, 5))
+    assert len(vhdr) == len(ot) == len(pu) == 1, (vhdr, ot, pu)
+    vc_end = max(o + old[o] for o, _ in vc)
+    assert struct.unpack_from("<H", old, vhdr[0] + 5)[0] == vc_end - vhdr[0], "VC header wTotalLength"
+    assert old[ot[0] + 7] == old[pu[0] + 3] and XU_ID not in {old[o + 3] for o, _ in vc}, "chain, unit IDs"
+    # bLength 26 = 24 + 1 input pin + bControlSize 1; 1 control, source the processing unit,
+    # bmControls bit XU_SEL - 1, no string
+    xu = bytes([26, 0x24, 0x06, XU_ID]) + XU_GUID.bytes_le + bytes([1, 1, old[pu[0] + 3], 1, 1 << (XU_SEL - 1), 0])
     hdr, fmt, frm = ([o for o, s in vs if s == k] for k in (1, 6, 7))
     assert len(hdr) == len(fmt) == len(frm) == 1 and old[frm[0] + 3] == 1, (hdr, fmt, frm)
+    assert vc_end <= hdr[0], "VideoControl before VideoStreaming"
     f1 = old[frm[0] : frm[0] + old[frm[0]]]
     frames = b""
     for i, (w, h) in enumerate(V6_FRAMES):
@@ -165,11 +191,13 @@ def v6_cfg_want(img):
         struct.pack_into("<HH", f, 5, w, h)
         struct.pack_into("<I", f, 17, w * h * 2)  # dwMaxVideoFrameBufferSize, as stock's 1280*720*2
         frames += f
-    new = bytearray(old[: frm[0]] + frames + old[frm[0] + len(f1) :])
+    new = bytearray(old[:vc_end] + xu + old[vc_end : frm[0]] + frames + old[frm[0] + len(f1) :])
     grow = len(frames) - len(f1)
     struct.pack_into("<H", new, 2, len(new))
-    new[fmt[0] + 4] = len(V6_FRAMES)
-    struct.pack_into("<H", new, hdr[0] + 4, struct.unpack_from("<H", old, hdr[0] + 4)[0] + grow)
+    new[ot[0] + 7] = XU_ID
+    struct.pack_into("<H", new, vhdr[0] + 5, vc_end - vhdr[0] + len(xu))
+    new[fmt[0] + len(xu) + 4] = len(V6_FRAMES)
+    struct.pack_into("<H", new, hdr[0] + len(xu) + 4, struct.unpack_from("<H", old, hdr[0] + 4)[0] + grow)
     return old, bytes(new)
 
 
@@ -196,7 +224,7 @@ HEAP = (
 )
 DATA = [STACK4K, HEAP] if CANARY else [G4, STACK4K, HEAP, *V6_DATA]
 if not CANARY:
-    HOOKS += V6_HOOKS
+    HOOKS += V6_HOOKS + XU_HOOKS
 
 # Words that become the address of a gap symbol, plus an offset. The MSC eject callback word
 # (SD LUN ops +0x30): stock reaches it with blx r2 at 0x4e914. eject_stub is ARM, so bit 0
@@ -208,14 +236,18 @@ if not CANARY:
     v6_old, v6_want = v6_cfg_want(d)
     c0 = sym["v6_cfg"]
     assert c0 % 4 == 0 and GAP <= c0 and c0 + len(v6_want) <= g1, hex(c0)
-    assert gap[c0 - GAP : c0 - GAP + len(v6_want)] == v6_want, "src/v6.S v6_cfg is not stock's config + V6_FRAMES"
+    assert gap[c0 - GAP : c0 - GAP + len(v6_want)] == v6_want, "src/v6.S v6_cfg is not stock's config + V6_FRAMES + XU"
+    assert sym["xu_box"] % 4 == 0, "xu_box: 0xbc9cc reads GET_CUR data with word loads"
     assert d[V6_L2[0] : V6_L2[0] + 20].hex() == V6_L2[1] and ep_size_at(v6_old, 0x85) == V6_L2[2]
     moved = ep_size_at(v6_want, 0x85) - V6_L2[2]
     WORD_HOOKS += [
         (0x3EF00, "d0390e00", "v6_cfg", False, 0, "register_desc(1) in usb_uvc_init: config 0xe39d0 -> v6_cfg"),
         (0x52488, "d0390e00", "v6_cfg", False, moved, f"alt-3 wMaxPacketSize write at cfg+0xd4: + {moved:#x}"),
     ]
-    print(f"v6_cfg {c0:#x}: {len(v6_want)} B, stock's {len(v6_old)} B config with {len(V6_FRAMES)} frames")
+    print(
+        f"v6_cfg {c0:#x}: {len(v6_want)} B, stock's {len(v6_old)} B config with {len(V6_FRAMES)} frames"
+        f" and extension unit {XU_ID} {{{XU_GUID}}}"
+    )
 
 # G7, the auto-off variant covering VBUS states 1 and 2. Disassembled in the image:
 # cmp r0,#0 / movne fp,#0 / strne fp,[r8] / bne 0x22390, so the counter is held while

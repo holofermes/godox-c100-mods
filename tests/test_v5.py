@@ -6,6 +6,7 @@
 import os
 import struct
 import sys
+import uuid
 import zlib
 
 from emu import (
@@ -40,12 +41,14 @@ from emu import (
     SD_OPS,
     STACK,
     USBQ_H,
+    UVC_ERR,
     W_APP_STATE,
     W_NV_DIR,
     W_NV_MUTEX,
     B,
     Card,
     EmuError,
+    Ep0,
     Harness,
     Machine,
 )
@@ -118,7 +121,10 @@ HOOKMAP = [
     ("V6P", 0x629D4 - B, "010053e3", "bytes", "060053e3"),
     ("V6P", 0x629D8 - B, "a6ffff1a", "bytes", "a6ffff8a"),
     ("V6C", 0x3EF00, "d0390e00", "word", "v6_cfg"),
-    ("V6C", 0x52488, "d0390e00", "word", "v6_cfg+0xbe"),
+    ("V6C", 0x52488, "d0390e00", "word", "v6_cfg+0xd8"),
+    ("XU", 0x507F0, "3430d4e5", "b", "xu_out"),
+    ("XU", 0x50980, "b423d4e1", "b", "xu_in"),
+    ("XU", 0x52570, "010056e3", "b", "xu_data"),
 ]
 LOADLEN, LOADLEN_SHIP = 0x1002E, 0x741
 SIZE, TEST_PAD = 1841152, 0x200000  # tools/patch.py: a test-only build is padded with 0xFF
@@ -1431,6 +1437,10 @@ def t_stack(h):
         ("reboot", "reboot\n", None),
         ("remount after eject + set", "set display=off\n", ejected),
         ("webcam 5", "webcam 5\n", None),
+        ("drive", "drive\n", None),
+        ("extension unit: drive", None, lambda m: xu_put(m, "drive")),
+        ("extension unit: webcam 5", None, lambda m: xu_put(m, "webcam 5")),
+        ("extension unit: 32 B set line", None, lambda m: xu_put(m, "set " + "x" * 28)),
     )
     for label, cmd, setup in cases:
         m = boot(cmd=cmd)
@@ -1502,7 +1512,7 @@ def t_v6(h):
 # ---------------------------------------------------------------- webcam frame sizes
 V6_FRAMES = [(1920, 1080), (1280, 720), (640, 360), (320, 180), (256, 144), (128, 72)]
 V6_CFG_STOCK = 0xE39D0  # stock's config descriptor; nothing points at it in the patched image
-PROBE, PROBE_HOST, UVC_ERR = 0xE3B2C, 0x124428, 0x12440A  # committed probe, host's data, request error
+PROBE, PROBE_HOST = 0xE3B2C, 0x124428  # committed probe, host's data
 # register_desc table, +4 = config; EP0 state +0x28 data, +0x2c length, +0x36 wLength, +0x38 zero-length flag
 UVC_DESC = 0x134E34
 ZOOM_A, ZOOM_B = 0xF19F4, 0xF19C0  # per-path zoom bytes, paths 0 and 1 (0x12d68)
@@ -1551,7 +1561,11 @@ def t_v6_desc(h):
     h.eq(d[V6_CFG_STOCK + B : V6_CFG_STOCK + B + n0], old, "stock's config at 0xe39d0 left as stock")
     ds, ods = descs(cfg), descs(old)
     h.eq(sum(n for _, n, *_ in ds), tot, "descriptor lengths add up to wTotalLength")
-    h.eq((tot, len(ds)), (0x200, len(ods) + 5), f"512 B, {len(ods) + 5} descriptors: stock's {len(ods)} + 5 frames")
+    h.eq(
+        (tot, len(ds)),
+        (0x21A, len(ods) + 6),
+        f"538 B, {len(ods) + 6} descriptors: stock's {len(ods)} + 5 frames + the extension unit",
+    )
     h.eq(cfg[4], len({i[0] for *_, i in ds if i}), "bNumInterfaces = the interfaces in it (4)")
 
     vs = [x for x in ds if x[2] == 0x24 and x[4] and x[4][2:] == (0x0E, 2)]  # video streaming, class-specific
@@ -1586,18 +1600,24 @@ def t_v6_desc(h):
     )
 
     def strip(b, walk):
-        """the descriptors minus the frames, with the three length fields zeroed"""
+        """the descriptors minus the frames and the extension unit, with the four length fields
+        and the output terminal's source zeroed"""
         out = []
         for o, n, t, s, itf in walk:
             x = bytearray(b[o : o + n])
-            if t == 0x24 and s == 7 and itf and itf[2:] == (0x0E, 2):
+            vs, vc = itf and itf[2:] == (0x0E, 2), itf and itf[2:] == (0x0E, 1)
+            if t == 0x24 and (s == 7 and vs or s == 6 and vc):
                 continue
             if t == 2:
                 x[2:4] = b"\0\0"
-            if t == 0x24 and s == 1 and itf and itf[2:] == (0x0E, 2):
+            if t == 0x24 and s == 1 and vs:
                 x[4:6] = b"\0\0"
-            if t == 0x24 and s == 6 and itf and itf[2:] == (0x0E, 2):
+            if t == 0x24 and s == 6 and vs:
                 x[4] = 0
+            if t == 0x24 and s == 1 and vc:
+                x[5:7] = b"\0\0"
+            if t == 0x24 and s == 3 and vc:
+                x[7] = 0
             out.append(bytes(x))
         return out
 
@@ -1606,6 +1626,7 @@ def t_v6_desc(h):
     oep = [o for o, n, t, *_ in ods if t == 5 and old[o + 2] == 0x85]
     h.eq(oep[-1] + 4, 0xD4, "stock: the alt-3 EP 0x85 wMaxPacketSize is at cfg+0xd4 (0x52370 writes there)")
     h.eq(w32(0x52488) + 0xD4, c0 + ep[-1] + 4, "pool 0x52488 + 0xd4 = v6_cfg's alt-3 wMaxPacketSize")
+    h.eq(ep[-1] + 4 - 0xD4, 0xD8, "that field moved by 0xd8: 0xbe for the frames, 26 for the extension unit")
 
     print("  the stock USB code on v6_cfg")
     m = Machine(IMAGE, SYM)
@@ -1615,18 +1636,19 @@ def t_v6_desc(h):
         m.call_arm(0x508B4, until=0x50860, regs={UC_ARM_REG_R4: UVC_DESC, UC_ARM_REG_R12: typ})
         h.eq(
             (m.u32(UVC_DESC + 0x28), m.u32(UVC_DESC + 0x2C), m.u8(c0 + 1)),
-            (c0, 0x200, typ),
-            f"GET_DESCRIPTOR type {typ} (0x508b4): v6_cfg, 512 B, byte 1 = {typ}",
+            (c0, 0x21A, typ),
+            f"GET_DESCRIPTOR type {typ} (0x508b4): v6_cfg, 538 B, byte 1 = {typ}",
         )
-    for wlen, sent, zlp in ((9, 9, 0), (0xFF, 0xFF, 0), (0x200, 0x200, 0), (0x400, 0x200, 1)):
-        m.poke32(UVC_DESC + 0x2C, 0x200)
+    # 538 is not a multiple of 64: the zero-length packet flag never comes up
+    for wlen, sent in ((9, 9), (0xFF, 0xFF), (0x200, 0x200), (0x21A, 0x21A), (0x400, 0x21A), (0xFFFF, 0x21A)):
+        m.poke32(UVC_DESC + 0x2C, 0x21A)
         m.poke16(UVC_DESC + 0x36, wlen)
         m.poke8(UVC_DESC + 0x38, 0)
         m.call_arm(0x4D2E0)
         h.eq(
             (m.u32(UVC_DESC + 0x2C), m.u8(UVC_DESC + 0x38)),
-            (sent, zlp),
-            f"EP0 clamp 0x4d2e0, wLength {wlen:#x}: sends {sent:#x} B, zero-length packet flag {zlp}",
+            (sent, 0),
+            f"EP0 clamp 0x4d2e0, wLength {wlen:#x}: sends {sent:#x} B, zero-length packet flag 0",
         )
     gw = m.watch_writes(GAP, GAP_END)
     sw = m.watch_writes(V6_CFG_STOCK, V6_CFG_STOCK + n0)
@@ -1946,6 +1968,487 @@ def t_webcam_boot(h):
     h.clean(m)
 
 
+# ---------------------------------------------------------------- drive
+DRIVE = "DRIVE.ONE"
+
+
+def t_drive_cmd(h):
+    h.section = "drive command"
+    print("\nCMD.TXT drive: DRIVE.ONE written and flushed, then the reboot path")
+    m = boot(cmd="drive\n")
+    allow_reboot(m)
+    tick(m, 5000)
+    h.eq(m.card.get(DRIVE), b"drive\r\n", "DRIVE.ONE holds 'drive\\r\\n'")
+    h.eq([t[2] for t in m.calls("apq")], [0x7007], "one post, 0x7007")
+    n = m.names()
+    mk = [i for i, name, fl in opened(m) if name == "G:\\" + DRIVE and fl == 0x601]
+    iu = n.index("unmount") if "unmount" in n else -1
+    ia = n.index("apq") if "apq" in n else -1
+    ok = (
+        len(mk) == 1
+        and n[mk[0] + 1 : mk[0] + 3] == ["write", "close"]
+        and "flush" in n[mk[0] : iu]
+        and n.index("flush", mk[0]) < iu < ia
+    )
+    h.ok(ok, "marker created, written, closed and flushed before the unmount and the post", f"({n})")
+    h.ok(
+        not any(t[0] in ("open", "write", "unlink") for t in m.trace[iu:]),
+        "no file call after the unmount: the marker stays for the next boot",
+    )
+    h.has("[v5] drive\r\n[v5] reboot\r\n", m=m)
+    h.clean(m)
+
+    print("  with an argument: not a command, nothing written")
+    for line in ("drive x", "drive 5"):
+        m = boot(cmd=line + "\n")
+        allow_reboot(m)
+        tick(m, 5000)
+        tick(m, 2100)
+        h.ok(
+            DRIVE not in m.card.names() and not m.calls("apq") and "unmount" not in m.names(),
+            f"`{line}`: no marker, no unmount, no post",
+        )
+        h.has("cmd: bad drive", f"`{line}`: LOG.TXT `cmd: bad drive`", m=m)
+
+    print("  refused like reboot: nothing written")
+    for name, addr, val, wide in (
+        ("capture busy", B_CAPTURE_BUSY, 1, False),
+        ("recording", B_REC_FLAGS, 2, False),
+        ("record transition", B_REC_FLAGS, 8, False),
+        ("startup state", W_APP_STATE, 0x100, True),
+    ):
+        m = boot(cmd="drive\n")
+        allow_reboot(m)
+        (m.poke16 if wide else m.poke8)(addr, val)
+        tick(m, 5000)
+        tick(m, 2100)
+        h.ok(
+            DRIVE not in m.card.names() and not m.calls("apq") and "unmount" not in m.names(),
+            f"{name}: no marker, no unmount, no post",
+            f"({m.card.names()}, {m.names()})",
+        )
+        h.has("[v5] reboot 3", f"{name}: LOG.TXT `reboot 3`", m=m)
+
+    print("  the unmount fails: no post, the marker is deleted again")
+    m = boot(cmd="drive\n")
+    allow_reboot(m)
+    m.unmount_ret = -1
+    tick(m, 5000)
+    tick(m, 2100)
+    h.eq((m.calls("apq"), DRIVE in m.card.names()), ([], False), "no post, no DRIVE.ONE left")
+    h.has("[v5] reboot ffffffff\r\n[v5] drive: marker removed", m=m)
+    h.eq(leaks(m), {}, "no heap left behind")
+    h.clean(m)
+
+
+def t_drive_boot(h):
+    h.section = "drive boot"
+    print("\nboot with DRIVE.ONE: deleted first, then the drive on every switch position")
+    for mode in (0, 1, 2):
+        m = boot(files={DRIVE: "drive\r\n"}, mode=mode)
+        m.gpio_input(95, 0)
+        tick(m, 2100)  # the log goes out before the drive takes the card
+        plug(m)
+        h.eq([t[2] for t in m.calls("qsend")], [0x8001], f"switch {mode}: plug-in posts the drive init 0x8001")
+        h.ok(DRIVE not in m.card.names(), f"switch {mode}: DRIVE.ONE deleted")
+        h.has("[v5] drive: boot\r\n", f"switch {mode}: LOG.TXT `drive: boot`", m=m)
+        tick(m, 2 * 24 * 3600 * 1000)
+        h.eq(m.calls("apq"), [], f"switch {mode}: no timer, two days later nothing posted")
+        h.eq(leaks(m), {}, f"switch {mode}: no heap left behind")
+
+    print("  the delete and its flush come before anything is acted on")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, DRIVE: "drive\r\n"}))
+    acts = []
+    a = m.sym["drive_forced"]
+
+    def wr(uc, access, addr, size, value, _):
+        if value:
+            acts.append(len(m.trace))
+
+    m.uc.hook_add(UC_HOOK_MEM_WRITE, wr, begin=a, end=a)
+    mount(m)
+    n = m.names()
+    iu = [i for i, t in enumerate(m.trace) if t[0] == "unlink" and m.cstr(t[1]) == "G:\\" + DRIVE]
+    ok = len(iu) == 1 and "flush" in n[iu[0] :] and acts and all(i > n.index("flush", iu[0]) for i in acts)
+    h.ok(ok, "unlink, flush, then drive_forced is set", f"(unlink {iu}, acts {acts}, {n})")
+
+    print("  an empty DRIVE.ONE counts, an oversize one is deleted and ignored, an undeletable one left")
+    m = boot(files={DRIVE: ""}, mode=1)
+    m.gpio_input(95, 0)
+    plug(m)
+    h.eq([t[2] for t in m.calls("qsend")], [0x8001], "empty: Video is the drive")
+    m = boot(files={DRIVE: "x" * 20}, mode=1)
+    m.gpio_input(95, 0)
+    tick(m, 2100)
+    plug(m)
+    h.has("[v5] drive: bad file", m=m)
+    h.ok(
+        DRIVE not in m.card.names() and [t[2] for t in m.calls("qsend")] == [0x8003],
+        "20 B: deleted, Video is the webcam as C100.TXT says",
+        f"({m.card.names()}, {m.calls('qsend')})",
+    )
+    h.eq(leaks(m), {}, "20 B: no heap left behind")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, DRIVE: "drive\r\n"}))
+    m.unlink_ret = -1
+    mount(m)
+    m.poke8(B_USB_POLL_EN, 1)
+    m.poke16(W_APP_STATE, 0x101)
+    m.poke8(B_MODE, 1)
+    m.gpio_input(95, 0)
+    tick(m, 2100)
+    h.has("[v5] drive: rm fail", m=m)
+    plug(m)
+    h.eq([t[2] for t in m.calls("qsend")], [0x8003], "cannot be deleted: a normal boot, Video is the webcam")
+    h.eq(m.card.get(DRIVE), b"drive\r\n", "DRIVE.ONE still there")
+
+    print("  both markers: both deleted, the drive wins, no timer")
+    m = boot(files={DRIVE: "drive\r\n", ONCE: "5\r\n"}, mode=1)
+    m.gpio_input(95, 0)
+    tick(m, 2100)
+    plug(m)
+    h.ok(DRIVE not in m.card.names() and ONCE not in m.card.names(), "DRIVE.ONE and WEBCAM.ONE deleted")
+    h.eq([t[2] for t in m.calls("qsend")], [0x8001], "Video: the drive")
+    h.has("[v5] drive: boot\r\n[v5] webcam: ignored, drive boot\r\n", m=m)
+    tick(m, 10 * 60000)
+    h.eq(m.calls("apq"), [], "10 min later: nothing posted")
+    h.eq(leaks(m), {}, "no heap left behind")
+    m = boot(files={DRIVE: "drive\r\n", ONCE: "abc"}, mode=1)
+    tick(m, 2100)
+    h.has("[v5] drive: boot\r\n[v5] webcam: bad abc\r\n", m=m)
+    h.ok(DRIVE not in m.card.names() and ONCE not in m.card.names(), "bad WEBCAM.ONE: both deleted")
+
+    print("  once per boot, after the update check")
+    m = boot(files={DRIVE: "drive\r\n"})
+    m.card.f[DRIVE] = bytearray(b"drive\r\n")
+    mount(m)
+    h.eq(m.card.get(DRIVE), b"drive\r\n", "a second mount in the same boot leaves a new marker for the next boot")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, DRIVE: "drive\r\n"}))
+    m.poke8(B_UPD_CHECKED, 2)
+    mount(m)
+    h.eq((m.card.get(DRIVE), m.hits["load_settings"]), (b"drive\r\n", 0), "a mount during an update: marker untouched")
+    h.clean(m)
+
+
+# ---------------------------------------------------------------- extension unit
+XU_ID, XU_SEL, XU_LEN = 6, 1, 32  # src/xu.h
+XU_GUID = uuid.UUID("21118ec3-89d6-4bb3-8015-7611dd2b1f87")
+GET_CUR, GET_MIN, GET_MAX, GET_RES, GET_LEN, GET_INFO, GET_DEF = range(0x81, 0x88)
+VS_ALT = 0x123D3C  # EP5 alt setting, 3 while a host streams
+
+
+def xu_box(m):
+    return bytes(m.uc.mem_read(m.sym["xu_box"], XU_LEN)), m.u8(m.sym["xu_full"])
+
+
+def xu_put(m, line):
+    """a line in the mailbox, as xu_data leaves it"""
+    m.put(m.sym["xu_box"], line.encode().ljust(XU_LEN, b"\0"))
+    m.poke8(m.sym["xu_full"], 1)
+
+
+def u16le(b, o):
+    return struct.unpack_from("<H", b, o)[0]
+
+
+def t_xu_desc(h):
+    h.section = "extension unit: descriptor"
+    print("\nthe extension unit in v6_cfg, on the chain Linux walks back from the output terminal")
+    d, S = open(IMAGE, "rb").read(), syms()
+    c0 = S["v6_cfg"]
+    cfg = d[c0 + B : c0 + B + u16le(d, c0 + B + 2)]
+    vc = [x for x in descs(cfg) if x[2] == 0x24 and x[4] and x[4][2:] == (0x0E, 1)]
+    h.eq(
+        [x[3] for x in vc],
+        [1, 2, 3, 4, 5, 6],
+        "VideoControl: header, camera terminal, output terminal, selector, processing and extension unit",
+    )
+    hdr = vc[0][0]
+    h.eq(u16le(cfg, hdr + 5), sum(x[1] for x in vc), "VC header wTotalLength = its class-specific descriptors")
+    h.eq(u16le(cfg, hdr + 5), 0x39 + 26, "VC header wTotalLength 0x53 (stock 0x39 + 26)")
+    o, n = vc[-1][0], vc[-1][1]
+    xu = cfg[o : o + n]
+    h.eq((xu[0], 24 + xu[21] + xu[22 + xu[21]]), (26, 26), "bLength 26 = 24 + 1 input pin + bControlSize 1")
+    h.eq(xu[3], XU_ID, "bUnitID 6")
+    h.eq(bytes(xu[4:20]), XU_GUID.bytes_le, f"guidExtensionCode {{{XU_GUID}}}")
+    h.eq(
+        tuple(xu[20:26]),
+        (1, 1, 5, 1, 1 << (XU_SEL - 1), 0),
+        "1 control, 1 input pin from unit 5, bControlSize 1, bmControls = selector 1, no string",
+    )
+    src_at = {3: 7, 4: 5, 5: 4, 6: 22}  # bSourceID / baSourceID[0] per subtype
+    ent = {cfg[o + 3]: (s, cfg[o : o + n]) for o, n, _, s, _ in vc[1:]}
+    h.ok(len(ent) == len(vc) - 1 and 0 not in ent, "terminal and unit IDs unique and nonzero", f"({sorted(ent)})")
+    out = [i for i, (s, b) in ent.items() if s == 3 and u16le(b, 4) == 0x0101]
+    chain, cur = [], out[0] if out else None
+    while cur in ent and cur not in chain:
+        chain.append(cur)
+        s, b = ent[cur]
+        if s == 2:
+            break
+        cur = b[src_at[s]]
+    h.eq(chain, [3, 6, 5, 4, 1], "chain: output terminal 3 <- extension unit 6 <- processing 5 <- selector 4 <- 1")
+    h.eq(u16le(ent[1][1], 4), 0x0201, "and 1 is the camera terminal")
+
+    print("  GET_DESCRIPTOR through the stock EP0 handlers")
+    m = Machine(IMAGE, SYM)
+    m.call_arm(0x3EDC4, until=0x3EDD0)  # register_desc(1) as usb_uvc_init does it
+    e = Ep0(m)
+    r = e.request(0x80, 6, 0x0200, 0, 9)
+    h.eq(r["data"], cfg[:9], "wLength 9: the first 9 B, wTotalLength 0x21a")
+    r = e.request(0x80, 6, 0x0200, 0, 0xFFFF)
+    rest = e.in_rest()
+    h.eq(
+        (len(r["data"]), len(rest)),
+        (64, 474),
+        "wLength 0xffff: 64 B, then 474 B (7 x 64 + 26) from the IN-done handler",
+    )
+    h.eq(r["data"] + rest, cfg, "the 538 B are v6_cfg")
+    h.clean(m)
+
+
+def t_xu_ep0(h):
+    h.section = "extension unit: EP0"
+    print("\nextension unit requests through the stock EP0 handlers 0x507ac and 0x524b8")
+    m = boot()
+    e = Ep0(m)
+    m.trap_overlay()
+    line = b"display off".ljust(XU_LEN, b"\0")
+    r = e.get(GET_INFO, XU_SEL, XU_ID, 1)
+    h.eq((r["stall"], r["data"], r["err"]), (False, b"\x03", 0), "GET_INFO: 0x03 (GET and SET)")
+    r = e.get(GET_LEN, XU_SEL, XU_ID, 2)
+    h.eq((r["stall"], r["data"], r["err"]), (False, b"\x20\x00", 0), "GET_LEN: 32")
+    r = e.get(GET_CUR, XU_SEL, XU_ID, XU_LEN)
+    h.eq((r["stall"], r["data"]), (False, bytes(XU_LEN)), "GET_CUR before any line: 32 zeros")
+    r = e.set_cur(XU_SEL, XU_ID, line)
+    h.eq(
+        (r["stall"], r["armed"], r["status"], r["err"]),
+        (False, True, True, 0),
+        "SET_CUR: data stage armed, status stage sent, no error",
+    )
+    h.eq(xu_box(m), (line, 1), "the line in xu_box, xu_full set")
+    r = e.get(GET_CUR, XU_SEL, XU_ID, XU_LEN)
+    h.eq(r["data"], line, "GET_CUR: the line still waiting")
+    r = e.set_cur(XU_SEL, XU_ID, b"led off".ljust(XU_LEN, b"\0"))
+    h.eq(
+        (r["stall"], r["armed"], e.error_code()), (True, False, 1), "SET_CUR while it waits: stall, code 1 (not ready)"
+    )
+    h.eq(xu_box(m), (line, 1), "the waiting line untouched")
+    h.eq(e.error_code(), 0, "the error code reads back once, then 0 (stock 0x51098)")
+    h.eq(m.ovl_blocks, [], "no overlay code ran for any of it")
+    tick(m)
+    h.eq(xu_box(m), (bytes(XU_LEN), 0), "the tick took it: box zeroed, flag clear")
+    h.eq(e.get(GET_CUR, XU_SEL, XU_ID, XU_LEN)["data"], bytes(XU_LEN), "GET_CUR: zeros again")
+    r = e.set_cur(XU_SEL, XU_ID, b"led off".ljust(XU_LEN, b"\0"))
+    h.eq((r["stall"], r["status"]), (False, True), "and the next SET_CUR is taken")
+
+    print("  everything else stalls with an error code, as stock stalls")
+    m = boot()
+    e = Ep0(m)
+    cases = [
+        ("GET_CUR selector 2", lambda: e.get(GET_CUR, 2, XU_ID, XU_LEN), 6),
+        ("GET_INFO selector 0", lambda: e.get(GET_INFO, 0, XU_ID, 1), 6),
+        ("GET_CUR wValue 0x0101", lambda: e.request(0xA1, GET_CUR, 0x0101, XU_ID << 8, XU_LEN), 6),
+        ("GET_CUR wLength 31", lambda: e.get(GET_CUR, XU_SEL, XU_ID, 31), 7),
+        ("GET_CUR wLength 64", lambda: e.get(GET_CUR, XU_SEL, XU_ID, 64), 7),
+        ("GET_LEN wLength 1", lambda: e.get(GET_LEN, XU_SEL, XU_ID, 1), 7),
+        ("GET_INFO wLength 2", lambda: e.get(GET_INFO, XU_SEL, XU_ID, 2), 7),
+        ("GET_MIN", lambda: e.get(GET_MIN, XU_SEL, XU_ID, XU_LEN), 7),
+        ("GET_MAX", lambda: e.get(GET_MAX, XU_SEL, XU_ID, XU_LEN), 7),
+        ("GET_RES", lambda: e.get(GET_RES, XU_SEL, XU_ID, XU_LEN), 7),
+        ("GET_DEF", lambda: e.get(GET_DEF, XU_SEL, XU_ID, XU_LEN), 7),
+        ("GET request 0x88", lambda: e.get(0x88, XU_SEL, XU_ID, XU_LEN), 7),
+        ("SET_CUR selector 2", lambda: e.set_cur(2, XU_ID, line), 6),
+        ("SET_CUR wLength 31", lambda: e.set_cur(XU_SEL, XU_ID, line[:31]), 7),
+        ("SET_CUR wLength 33", lambda: e.set_cur(XU_SEL, XU_ID, line + b"\0"), 7),
+        ("SET request 0x11", lambda: e.set_cur(XU_SEL, XU_ID, line, req=0x11), 7),
+        ("GET_CUR unit 7 (stock)", lambda: e.get(GET_CUR, XU_SEL, 7, XU_LEN), 5),
+    ]
+    for what, fn, code in cases:
+        r = fn()
+        h.eq(
+            (r["stall"], r["armed"], r["data"] or None, e.error_code(), xu_box(m)),
+            (True, False, None, code, (bytes(XU_LEN), 0)),
+            f"{what}: stall, no data stage, error code {code}, mailbox untouched",
+        )
+    h.clean(m)
+
+    print("  features off: answered, SET_CUR refused with code 2, nothing runs")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT}))  # before any mount: no overlay
+    e = Ep0(m)
+    m.trap_overlay()
+    h.eq(e.get(GET_INFO, XU_SEL, XU_ID, 1)["data"], b"\x03", "no overlay: GET_INFO answered")
+    h.eq(e.get(GET_LEN, XU_SEL, XU_ID, 2)["data"], b"\x20\x00", "no overlay: GET_LEN answered")
+    h.eq(e.get(GET_CUR, XU_SEL, XU_ID, XU_LEN)["data"], bytes(XU_LEN), "no overlay: GET_CUR answered, zeros")
+    r = e.set_cur(XU_SEL, XU_ID, line)
+    h.eq((r["stall"], r["armed"], e.error_code()), (True, False, 2), "no overlay: SET_CUR stall, code 2")
+    h.eq(xu_box(m), (bytes(XU_LEN), 0), "no overlay: mailbox untouched")
+    m.call_arm(0x22360, sp=STACK - 0x100, until=0x22364)
+    h.eq(m.ovl_blocks, [], "no overlay code ran, the tick only refreshes the display")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT}))
+    m.nor[OVL_FLASH + OVL_HDR + 0x40] ^= 0xFF  # body CRC fails: the load fails
+    mount(m)
+    e = Ep0(m)
+    r = e.set_cur(XU_SEL, XU_ID, line)
+    h.eq((st_load_err(m), r["stall"], e.error_code()), (5, True, 2), "after a failed overlay load: code 2")
+    m = boot()
+    e = Ep0(m)
+    m.poke8(B_UPD_CHECKED, 2)
+    r = e.set_cur(XU_SEL, XU_ID, line)
+    h.eq((r["stall"], e.error_code()), (True, 2), "[0x123d34] = 2 (updater started): code 2")
+    h.clean(m)
+
+
+def st_load_err(m):
+    return stv(m, ST_LOAD_ERR)
+
+
+def t_xu_regress(h):
+    h.section = "extension unit: stock requests"
+    print("\nevery other class request on interfaces 0 and 1: the same answer as the base image")
+    runs = {}
+    for name, img in (("base", BASE), ("built", IMAGE)):
+        m = Machine(img, SYM)
+        m.call_arm(0x3EDC4, until=0x3EDD0)
+        e = Ep0(m)
+        out = []
+        for iface in (0, 1):
+            for unit in (0, 1, 2, 3, 4, 5, 6, 7):
+                if (iface, unit) == (0, XU_ID):
+                    continue
+                for sel in range(5):
+                    for req in range(0x81, 0x88):
+                        for ln in (1, 2, 26):
+                            try:
+                                r = e.get(req, sel, unit, ln, iface)
+                            except EmuError as x:
+                                r = str(x)
+                            out.append(((iface, unit, sel, req, ln), r, bytes(m.uc.mem_read(0xE3B20, 0xE0))))
+                    for data in (b"\x10\x00", b"\x00\x40", bytes(26), b"\x01"):
+                        try:
+                            r = e.set_cur(sel, unit, data, iface=iface)
+                        except EmuError as x:
+                            r = str(x)
+                        out.append(((iface, unit, sel, 1, data), r, bytes(m.uc.mem_read(0xE3B20, 0xE0))))
+        runs[name] = (out, m.violations)
+    base, built = runs["base"][0], runs["built"][0]
+    diff = [(k, a, b) for (k, a, sa), (_, b, sb) in zip(base, built, strict=True) if (a, sa) != (b, sb)]
+    h.eq(len(built), len(base), f"{len(base)} requests on each image")
+    h.ok(
+        not diff, "answers, stalls, error codes and the stock control state 0xe3b20..0xe3c00 all equal", f"({diff[:3]})"
+    )
+    # stock answers a few GETs from halfword-aligned data (0xe3b4a, 0xe3bda, ...), which 0xbc9cc
+    # reads with word loads; the same on both images
+    h.eq(runs["built"][1], runs["base"][1], "the model flags the same stock unaligned answers on both, no others")
+
+    print("  brightness, the stock control (processing unit 5, selector 2); 0x527f0 reads it big-endian")
+    got = {}
+    for name, img in (("base", BASE), ("built", IMAGE)):
+        m = Machine(img, SYM)
+        e = Ep0(m)
+        got[name] = [
+            e.set_cur(2, 5, b"\x00\x40"),
+            m.u16(0xE3B4C),
+            e.get(GET_CUR, 2, 5, 2),
+            e.set_cur(2, 5, b"\x40\x00"),
+            m.u16(0xE3B4C),
+        ]
+    b = got["built"]
+    h.eq(b, got["base"], "SET_CUR, GET_CUR, an out-of-range SET_CUR: as on the base image")
+    h.eq((b[0]["status"], b[0]["err"], b[1]), (True, 0, 0x40), "SET_CUR 00 40: status stage, 0x40 at 0xe3b4c")
+    h.eq((b[3]["status"], b[3]["err"], b[4]), (True, 4, 0x40), "SET_CUR 40 00: error 4 (above 255), not stored")
+    h.clean(m)
+
+
+def t_xu_run(h):
+    h.section = "extension unit: commands"
+    print("\na line from the extension unit runs through the CMD.TXT parser on the next tick")
+
+    def sent(line, cfg_text=CFG_DEFAULT, **kw):
+        m = boot(cfg_text, **kw)
+        allow_reboot(m)
+        tick(m, 100)  # C100.TXT applied
+        e = Ep0(m)
+        r = e.set_cur(XU_SEL, XU_ID, line.encode().ljust(XU_LEN, b"\0"))
+        assert not r["stall"], r
+        m.reset()
+        tick(m, 100)
+        return m
+
+    m = sent("display off")
+    h.eq([t[1] for t in m.calls("ht_cmd")], [0x02], "display off: LCD OFF")
+    tick(m, 2100)
+    h.has("[v5] xu: display off\r\n[v5] display=off\r\n[v5] lcd off\r\n", m=m)
+    m = sent("display on", "display=off\nlog=on\n")
+    h.eq([t[1] for t in m.calls("ht_cmd")], [0x03], "display on: LCD ON")
+    m = sent("led off")
+    h.eq(m.u8(m.sym["led"] + LED_OFF), 1, "led off: the LED gate shut")
+    m = sent("sound off")
+    h.eq(cfgv(m, CFG_SOUND), 0, "sound off")
+    m = sent("set usb_video=drive")
+    h.eq(cfgv(m, CFG_USB + 1), 1, "set usb_video=drive")
+    m = sent("reboot")
+    h.eq([t[2] for t in m.calls("apq")], [0x7007], "reboot: 0x7007 posted")
+    h.has("[v5] xu: reboot\r\n[v5] reboot\r\n", m=m)
+    m = sent("webcam 5")
+    h.eq((m.card.get(ONCE), [t[2] for t in m.calls("apq")]), (b"5\r\n", [0x7007]), "webcam 5: WEBCAM.ONE, 0x7007")
+    m = sent("drive")
+    h.eq((m.card.get(DRIVE), [t[2] for t in m.calls("apq")]), (b"drive\r\n", [0x7007]), "drive: DRIVE.ONE, 0x7007")
+    h.has("[v5] xu: drive\r\n[v5] drive\r\n[v5] reboot\r\n", m=m)
+    m = sent("poke 0xe3388 1")
+    tick(m, 2100)
+    h.has("[v5] xu: poke 0xe3388 1\r\n[v5] cmd: bad poke", m=m)
+    m = sent("# a comment")
+    tick(m, 2100)
+    h.ok("cmd: bad" not in log(m), "a comment line does nothing")
+    m = sent("led off\r\ndisplay off")
+    h.eq(
+        (m.u8(m.sym["led"] + LED_OFF), m.calls("ht_cmd")), (1, []), "led off\\r\\ndisplay off: only up to the line end"
+    )
+    full = "set usb_photo=webcam" + " " * 12
+    m = sent(full)
+    h.eq(cfgv(m, CFG_USB), 2, "32 characters, no NUL: runs (set usb_photo=webcam)")
+    h.eq(leaks(m), {}, "no heap used")
+
+    print("  while the webcam streams, in Video and in Photo: drive is not refused")
+    for state in (0x101, 0x102):
+        m = boot(mode=1 if state == 0x101 else 0)
+        allow_reboot(m)
+        m.poke16(W_APP_STATE, state)
+        m.poke32(VS_ALT, 3)
+        e = Ep0(m)
+        e.set_cur(XU_SEL, XU_ID, b"drive".ljust(XU_LEN, b"\0"))
+        tick(m, 100)
+        h.ok(
+            m.card.get(DRIVE) == b"drive\r\n" and "unmount" in m.names() and [t[2] for t in m.calls("apq")] == [0x7007],
+            f"app state {state:#x}, alt 3: DRIVE.ONE written, card unmounted, 0x7007 posted",
+            f"({m.card.names()}, {m.names()})",
+        )
+
+    print("  the card not the camera's: the line waits; an update on the card: dropped")
+    m = boot()
+    e = Ep0(m)
+    e.set_cur(XU_SEL, XU_ID, b"display off".ljust(XU_LEN, b"\0"))
+    m.poke8(m.sym["st"] + ST_STALE, 1)
+    tick(m, 100)
+    h.eq((xu_box(m)[1], m.calls("ht_cmd")), (1, []), "card stale: still waiting, not run")
+    h.eq(e.get(GET_CUR, XU_SEL, XU_ID, XU_LEN)["data"][:11], b"display off", "GET_CUR shows it")
+    m.poke8(m.sym["st"] + ST_STALE, 0)
+    tick(m, 100)
+    h.eq((xu_box(m)[1], [t[1] for t in m.calls("ht_cmd")]), (0, [0x02]), "card back: taken and run")
+    m = boot(files={"GP_CARDVR_UPGRADE.BIN": b"fw"})
+    allow_reboot(m)
+    e = Ep0(m)
+    e.set_cur(XU_SEL, XU_ID, b"drive".ljust(XU_LEN, b"\0"))
+    tick(m, 100)
+    tick(m, 2100)
+    h.ok(
+        xu_box(m)[1] == 0 and DRIVE not in m.card.names() and not m.calls("apq") and "unmount" not in m.names(),
+        "update on the card: taken, not run (no marker, no unmount, no post)",
+    )
+    h.has("[v5] xu: drive not run, update on the card", m=m)
+    h.clean(m)
+
+
 TESTS = (
     t_image,
     t_heap,
@@ -1981,6 +2484,12 @@ TESTS = (
     t_v6_size,
     t_webcam_cmd,
     t_webcam_boot,
+    t_drive_cmd,
+    t_drive_boot,
+    t_xu_desc,
+    t_xu_ep0,
+    t_xu_regress,
+    t_xu_run,
 )
 
 

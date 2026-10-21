@@ -83,7 +83,8 @@ void cfg_defaults(struct v5_cfg *c);
 void cfg_parse(struct v5_cfg *c, char *text, u32 len); /* text[len] must be 0, modified in place */
 
 /* ---- cmd.c ---- */
-void cmd_run(char *text, u32 len); /* text[len] must be 0 */
+void cmd_run(char *text, u32 len); /* CMD.TXT: text[len] must be 0 */
+void cmd_line(char *line);         /* one line, NUL-terminated, no '\n' */
 
 /* ---- state.c ---- */
 void led_init(void); /* baked-in LED levels, call before cfg_apply */
@@ -130,10 +131,16 @@ void act_host_released(void);  /* start the drive handback; act_tick writes LUN 
 
 /* ---- webcam.c ---- */
 extern u8 webcam_forced;         /* this boot is the webcam on every switch position */
+extern u8 drive_forced;          /* this boot is the drive on every switch position */
 s32 webcam_min(const char *s);   /* minutes 0..1440, -1 if not a number in range */
-void webcam_cmd(s32 min);        /* CMD.TXT webcam: write the marker, reboot */
-void webcam_boot(void);          /* from load_settings: act on the marker once per boot */
+void webcam_cmd(s32 min);        /* `webcam [MIN]`: write the marker, reboot */
+void drive_cmd(void);            /* `drive`: write the marker, reboot */
+void once_boot(void);            /* from load_settings: act on the markers once per boot */
 void webcam_tick(void);          /* from v5_tick: the reboot MIN minutes after the boot */
+
+/* ---- xu.S (gap): the extension unit's mailbox, filled by a host SET_CUR ---- */
+extern volatile u8 xu_box[];     /* XU_LEN bytes, xu.h */
+extern volatile u8 xu_full;      /* 1 = xu_box holds a line the tick has not taken */
 
 /* ---- stubs.S (gap) ---- */
 CROSS u32 v5_irq_save(void);

@@ -624,6 +624,103 @@ class Machine:
         return 0
 
 
+# Webcam EP0 (src/xu.S, docs/webcam.md). The USB device task (0x4d260 -> 0x4d220) runs the
+# handlers usb_uvc_init installs (0x52a90): setup 0x507ac(1), IN done 0x4d150(0x15), OUT done
+# 0x524b8(0x16). They run as they are; the device controller's EP0 primitives are modelled.
+A_EP0_SETUP, A_EP0_IN_DONE, A_EP0_OUT_DONE = 0x507AC, 0x4D150, 0x524B8
+A_SETUP_READ, A_EP0_WRITE, A_EP0_STALL, A_EP0_ACK = 0xBCC2C, 0xBC9CC, 0xBC99C, 0xBC9B4
+A_EP0_ARM_OUT, A_EP0_OUT_COUNT, A_EP0_OUT_READ = 0xBCB18, 0xBCB5C, 0xBCB6C
+EP0, UVC_ERR = 0x134E34, 0x12440A  # EP0 state (+0x28 data, +0x2c left, +0x30 setup); request error code
+
+
+class Ep0:
+    """Control transfers through the stock UVC EP0 handlers. Models: the setup read 0xbcc2c
+    (8 B from the controller), the FIFO write 0xbc9cc (up to 64 B per call, read with word
+    loads, so the data must be 4-aligned; returns the count), the stall 0xbc99c, arming the OUT
+    data or status stage 0xbcb18, the OUT count 0xbcb5c and the FIFO read 0xbcb6c (refuses an
+    unaligned buffer or more than 64 B, as the real one does)."""
+
+    def __init__(self, m):
+        # the stubs below are code hooks: a second Ep0 on the same Machine would add a second set
+        assert not hasattr(m, "ep0"), "one Ep0 per Machine"
+        m.ep0 = self
+        self.m = m
+        self.setup = bytes(8)
+        self.out = b""
+        self.ev = []
+        m.stub(A_SETUP_READ, "ep0_setup", self._setup)
+        m.stub(A_EP0_WRITE, "ep0_write", self._write)
+        m.stub(A_EP0_STALL, "ep0_stall", lambda _m, *a: self.ev.append(("stall",)))
+        m.stub(A_EP0_ACK, "ep0_ack", lambda _m, *a: None)
+        m.stub(A_EP0_ARM_OUT, "ep0_arm", lambda _m, *a: self.ev.append(("arm",)))
+        m.stub(A_EP0_OUT_COUNT, "ep0_count", lambda _m, *a: len(self.out))
+        m.stub(A_EP0_OUT_READ, "ep0_read", self._read)
+
+    def _setup(self, m, dst, *a):
+        m.put(dst, self.setup)
+
+    def _write(self, m, ptr, n, *a):
+        n = min(n, 64)
+        if n and ptr & 3:
+            m.violations.append(f"EP0 FIFO write from {ptr:#x}: 0xbc9cc reads words, the data is not 4-aligned")
+        self.ev.append(("in", bytes(m.uc.mem_read(ptr, n)) if n else b""))
+        return n
+
+    def _read(self, m, dst, n, *a):
+        if dst & 3 or n > 64:
+            m.violations.append(f"EP0 FIFO read of {n} B to {dst:#x}")
+            return -1
+        m.put(dst, self.out[:n])
+        self.ev.append(("out", n))
+        return 0
+
+    def request(self, rt, req, value, index, length, data=b"", sp=STACK - 0x300):
+        """One control transfer: the setup stage, then for an OUT request the stock handler
+        armed, its data stage. Returns {stall, data (IN bytes), armed, status (the zero-length
+        IN after OUT data), err (the request error code byte)}."""
+        m = self.m
+        self.ev = []
+        self.setup = struct.pack("<BBHHH", rt, req, value, index, length)
+        m.task("usb")
+        m.call_arm(A_EP0_SETUP, 1, sp=sp)
+        armed = ("arm",) in self.ev
+        if armed and not rt & 0x80:
+            self.out = bytes(data)
+            m.call_arm(A_EP0_OUT_DONE, 0x16, sp=sp)
+        ins = [e[1] for e in self.ev if e[0] == "in"]
+        return {
+            "stall": ("stall",) in self.ev,
+            "data": b"".join(ins) if rt & 0x80 else None,
+            "armed": armed,
+            "status": not rt & 0x80 and ins == [b""],
+            "err": m.u8(UVC_ERR),
+        }
+
+    def in_rest(self, sp=STACK - 0x300):
+        """The IN-done handler 0x4d150 once per packet the host takes, until it arms the
+        status stage; the bytes sent after the first packet."""
+        m = self.m
+        out = b""
+        for _ in range(64):
+            self.ev = []
+            m.call_arm(A_EP0_IN_DONE, 0x15, sp=sp)
+            out += b"".join(e[1] for e in self.ev if e[0] == "in")
+            if ("arm",) in self.ev:
+                return out
+        raise EmuError("EP0 IN data stage did not end")
+
+    def get(self, req, sel, unit, length, iface=0):
+        return self.request(0xA1, req, sel << 8, unit << 8 | iface, length)
+
+    def set_cur(self, sel, unit, data, length=None, iface=0, req=0x01):
+        return self.request(0x21, req, sel << 8, unit << 8 | iface, len(data) if length is None else length, data)
+
+    def error_code(self):
+        """what Linux asks after a stall: GET_CUR of entity 0 selector 2 (0x51098), 1 B"""
+        r = self.get(0x81, 2, 0, 1)
+        return r["data"][0] if r["data"] and not r["stall"] else None
+
+
 class Harness:
     def __init__(self, m):
         self.m = m

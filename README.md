@@ -41,6 +41,9 @@ Built, not yet tested on the camera:
 
 - Webcam frame sizes 1280x720, 640x360, 320x180, 256x144 and 128x72, all from the full sensor.
 - `webcam [MIN]` in `CMD.TXT`: one boot as the webcam whatever the switch.
+- `drive` in `CMD.TXT`: one boot as the USB drive whatever the switch.
+- Commands from the PC while the camera is the webcam, also while it streams
+  (`tools/c100cmd.py`).
 
 Limits:
 
@@ -122,6 +125,22 @@ Commands, one per line, in the card root. Checked about every 3 s while the came
     webcam [MIN]        restart as the webcam, whatever the switch, for that boot only; with
                         MIN (1 to 1440), restart again MIN minutes later and follow the switch
                         (docs/usb.md). Not yet tested on the camera
+    drive               restart as the USB drive, whatever the switch, for that boot only
+                        (docs/usb.md). Not yet tested on the camera
+
+## Commands from the PC
+
+While the camera is the webcam, a Linux PC can send it one `CMD.TXT` line at a time, also while
+another program streams from it:
+
+    uv run tools/c100cmd.py display off
+    uv run tools/c100cmd.py drive
+
+The camera runs the line as if it came from `CMD.TXT` and logs it as `xu: <line>`; `drive` turns
+the webcam into the USB drive without touching the switch. The tool finds the camera by its USB
+ID (`--device /dev/videoN` to pick one) and needs only Python 3.11. Lines up to 32 characters.
+The camera takes a line only while it has a card and the patch loaded. The line goes through a
+UVC extension unit (docs/webcam.md). Not yet tested on the camera.
 
 ## LOG.TXT
 
@@ -151,8 +170,9 @@ The camera enumerates only when the cable goes into a camera that is already on.
 - `docs/hardware.md`: board, screen, LED, buttons, pins
 - `docs/firmware.md`: image layout, boot, card updater, recovery limits
 - `docs/hooks.md`: how the patch works, the overlay, the hook table, the tests
-- `docs/usb.md`: USB modes and the states behind them, one boot as the webcam
-- `docs/webcam.md`: 1080p, frame sizes, left/right and recording while streaming
+- `docs/usb.md`: USB modes and the states behind them, one boot as the webcam or the drive
+- `docs/webcam.md`: 1080p, frame sizes, left/right and recording while streaming, the extension
+  unit
 
 ## Credits
 

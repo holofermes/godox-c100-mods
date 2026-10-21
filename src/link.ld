@@ -1,7 +1,8 @@
 /* Two regions (docs/hooks.md):
  * gap: the unused RAM between the end of stock .data (0xe6968) and the start of
  *      stock .bss (0xe8000). The boot block copies it from the image; it holds
- *      what runs before the gate opens: stubs.S, the loader and its state, v6.S.
+ *      what runs before the gate opens: stubs.S, the loader and its state, v6.S,
+ *      xu.S.
  * ovl: the top 64 KB of RAM, which the patched heap-size literal keeps out of
  *      the FreeRTOS heap. The loader reads the overlay into it from NOR on the
  *      first card mount of a boot, or a later one if that load failed: a 16 B
@@ -16,7 +17,7 @@ MEMORY
 SECTIONS
 {
 	/* stubs, loader and st sit at the same addresses in the full build and
-	 * the canary; v6.S (full build only) comes last */
+	 * the canary; v6.S, then xu.S (full build only) come last */
 	.gap : {
 		__gap_start = .;
 		*(.text.stubs)
@@ -25,6 +26,7 @@ SECTIONS
 		*loader.c.o(.bss* COMMON)
 		. = ALIGN(4);
 		*(.text.v6)
+		*(.text.xu)
 		__gap_end = .;
 	} > gap
 
