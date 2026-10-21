@@ -85,6 +85,7 @@ A_LUN_REG, A_START_STOP, A_UART_PUT = 0x4EA70, 0x4E8DC, 0x48F14
 A_NV_READ, A_DCLEAN, A_DCLEAN_LINE = 0x594B8, 0x40158, 0x40160  # nv_read_page; clean D range, its per-line mcr
 A_SD_UNINIT = 0xB3844
 A_WDT_KICK = 0x47014  # 0xa005 to 0xd000002c, the SoC watchdog kick
+A_MSGQ_SEND = 0x5C320  # msgQSend(q, item, ticks): 0x3e5e0 posts uvc_task's start/stop with it
 A_PRINT_BUF, GAP, GAP_END = 0x124478, 0xE6968, 0xE8000
 
 # stock variables
@@ -214,6 +215,7 @@ class Machine:
         self.stub(A_QSEND, "qsend", self.f_qsend)
         self.stub(A_EJECT, "eject", self.f_eject)
         self.stub(A_NV_READ, "nv_read", self.f_nv_read)
+        self.stub(A_MSGQ_SEND, "msgq_send", self.f_msgq_send)
         # play_effect past its entry push (0x22a84): open the amp the way the body does
         # (gpio_set(44, 1) at 0x22b38, through the L1 gate), then return 0 like its
         # success path, popping the frame the entry pushed.
@@ -605,6 +607,11 @@ class Machine:
     def f_qsend(self, m, q, item, ticks, pos):
         self.trace[-1] = ("qsend", q, self.u32(item), ticks, pos)
         return self.qsend_ret
+
+    # msgQSend 0x5c320(q, item, ticks): 0 = sent (0x3e624 tests it); the trace keeps the first word
+    def f_msgq_send(self, m, q, item, ticks, *a):
+        self.trace[-1] = ("msgq_send", q, self.u32(item), ticks)
+        return 0
 
     # SD LUN eject callback 0xbe2d4: SD driver uninit (0xb3844), 0
     def f_eject(self, m, lun, *a):

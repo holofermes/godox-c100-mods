@@ -38,7 +38,13 @@ with the cable in gives no USB activity [inferred].
 
 - Unplug in state 1 (a charger, or webcam): a webcam is torn down with 0x8005; a drive gets
   stock's PHY off only, because 0x8002 would uninit the SD driver under the camera's own file
-  system.
+  system. A stream still running is stopped first the way the host's alt 0 stops it: stock's
+  alt callback 0x3e5e0(0) has `uvc_task` hand its frame back and post the stream stop 0x8008,
+  then 0.5 s later the uninit [read]. A pulled cable only gives the USB core a bus suspend,
+  which stock prints and ignores (0x52428), and the frame on EP5 never completes; the uninit
+  alone stops the encoder (0x3ec00), which frees the frame buffers (0x17900) under that frame.
+  Pulling the cable mid-stream that way turned the camera off [seen]; the stop first is not yet
+  tested on the camera.
 - Before a webcam init the patch clears [0x124294], the SET_CONFIG callback a drive init leaves
   behind. Its only writer is 0x4d65c (called only from the drive init) and its only reader
   0x4d054, which skips NULL [read]. Without that, a webcam session after a drive init would
@@ -65,29 +71,26 @@ cable still in it came back as the drive about 5 s after the eject [seen].
 ## Restart
 
 `reboot`, `webcam`, `drive` and the `webcam MIN` timer restart the camera the same way
-(`act_reboot` in `src/act.c`): flush `LOG.TXT`, unmount the card, post 0x7007 to the app, wait up
-to 10 s. The app runs stock's 0x1fbac, which does not cut the power: it sets the SoC watchdog to
-period 7 (0xd0000028), sets [0x12166e], arms an RTC alarm 2 s ahead and spins [read]. The watchdog
-runs out and resets the camera, and the alarm powers it back up [inferred]. So nothing may kick the
-watchdog once 0x1fbac runs. Stock kicks it in two places [read]: the peripheral task's tick, which
-`act_reboot` keeps blocked, and `uvc_task` (0x3e6d4), every second while the webcam is up. The
-patch skips that second kick while [0x12166e] is set (`src/wdt.S`), which 0x1fbac sets and never
-clears.
+(`act_reboot` in `src/act.c`): flush `LOG.TXT`, unmount the card, kick the watchdog once, then
+call stock's 0x1fbac in the peripheral task. 0x1fbac does not cut the power: it sets the SoC
+watchdog to period 7 (0xd0000028), sets [0x12166e], arms an RTC alarm 2 s ahead and spins
+[read]. The watchdog runs out and resets the camera, and the alarm powers it back up [inferred;
+the USB drop 0.4-1.1 s after the command is the reset, seen]. So nothing may kick the watchdog
+once 0x1fbac runs. Stock kicks it in two places [read]: the peripheral task's tick, which never
+runs again once that task spins in 0x1fbac, and `uvc_task` (0x3e6d4), every second while the
+webcam is up, whose kick the patch skips while [0x12166e] is set (`src/wdt.S`).
 
-- With the webcam up and no skip, `drive` from the PC did not restart: the RTC alarm fired with
-  the camera still running and `LOG.TXT` showed `reboot 1` [seen]. In a drive session, with no
-  `uvc_task`, `reboot` restarts within seconds [seen]. The skip is not yet tested on the camera.
-- Tearing the webcam down first (the uninit 0x8005) while a host streams turns the camera off
-  [seen]. The uninit stops the encoder (0x3ec00), which frees the frame buffers (0x17900); stock
-  does that only after the host stopped the stream and `uvc_task` handed its frame back [read],
-  the uninit does it with a frame in flight. The camera stopped within a second, and the watchdog
-  reset it with no alarm armed [inferred].
-- `reboot 1` after the 10 s means the restart did not come. The app is then stuck in 0x1fbac
-  until the Off switch: no mode changes, capture or recording, and no power-off of its own; the
-  card and `LOG.TXT` still work.
+- Stock calls 0x1fbac from the app on 0x7007. Posting 0x7007 and leaving it to the app failed in
+  a drive session with the switch on Video: after the host's eject stock's card check also
+  unmounted the card and told the app it was gone (0x3dc14, 0x5016), and the app never ran
+  0x1fbac; the camera went dark and did not restart [seen]. Calling it from the peripheral task
+  needs no app. Skipped from stock's 0x7007 case: the video state's 0x353f4, which only clears
+  the recording time on the display [read]. Not yet tested on the camera.
+- With the webcam up and no kick skip, the restart did not come: `uvc_task` kept the watchdog
+  fed [seen]. Tearing the webcam down first (the uninit 0x8005) while a host streamed turned the
+  camera off [seen] (see the unplug above).
 - `LOG.TXT`: `reboot`; `reboot 3` refused (capture, recording, or not in the photo or video
-  state), `reboot X` the unmount failed with error X, `reboot 2` the post failed, `reboot 1` no
-  restart.
+  state), `reboot X` the unmount failed with error X. Nothing is logged after the restart starts.
 
 ## One boot as the webcam
 

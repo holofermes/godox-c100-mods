@@ -182,9 +182,11 @@ the probe per frame index, the APMode 0x106 geometry per index, and `webcam` and
 command to the boot after, both markers at once. For the extension unit: its place on the chain,
 the whole descriptor read through the stock EP0 handlers (the device controller modelled), each
 of its requests and refusals, 1,875 other class requests answered as on the base image, and every
-command taken from the mailbox, while streaming too. The restart: unmount, 0x7007 and the 10 s
-wait with the webcam up, `reboot 1`, and stock's 0x1fbac run to its `b .`, after which `uvc_task`
-no longer kicks the watchdog. 808 checks for the full build, 144 for the canary. They do not model the scheduler, IRQs, the MMU and caches (the cache instructions run as
+command taken from the mailbox, while streaming too. The restart: unmount, one kick and stock's
+0x1fbac called from the peripheral task in every case (webcam up, streaming, a drive session in
+Video after an eject), and 0x1fbac run to its `b .`, after which `uvc_task` no longer kicks the
+watchdog. The webcam unplug: a running stream stopped through 0x3e5e0(0) before the uninit. 820
+checks for the full build, 144 for the canary. They do not model the scheduler, IRQs, the MMU and caches (the cache instructions run as
 no-ops; the calls are checked), real SD, flash or USB behaviour, or failures of malloc, read,
 write or the RTC.
 

@@ -68,10 +68,8 @@ static int once_write(const char *path, const char *tag, const char *text, s32 l
 	return 0;
 }
 
-/* Reboot through act_reboot. If it comes back with the card still mounted
- * (the unmount failed), the marker is deleted again; if it comes back after
- * the unmount (no restart, `reboot 1`), the marker stays and the next boot
- * uses it. */
+/* Reboot through act_reboot. It comes back only when refused or when the
+ * unmount failed, with the card still mounted: the marker is deleted again. */
 static void once_reboot(const char *path, const char *tag)
 {
 	act_reboot();

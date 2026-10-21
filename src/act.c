@@ -5,7 +5,6 @@
  * (docs/hooks.md, docs/usb.md). */
 
 #define CHIME_LATE 15000     /* ms since boot; later than this a held chime is dropped */
-#define REBOOT_WAIT 10000    /* ms to wait for the watchdog reset after the 0x7007 post */
 #define HANDBACK_SETTLE 2000 /* ms for a posted capture or record to show as busy */
 
 /* the gpio_set and v5_get95 stubs in stubs.S read struct v5_led with ldrb/strb
@@ -143,17 +142,20 @@ int reboot_busy(void)
 	return B_CAPTURE_BUSY || (B_REC_FLAGS & 0xa) || (app != 0x101 && app != 0x102);
 }
 
-/* Posted rather than calling fw_reboot: every stock caller of 0x1fbac runs
- * in the AP task, and the video state stops its pipeline (0x353f4) before it.
- * 0x1fbac does not cut the power: it sets the SoC watchdog to period 7, arms
- * an RTC alarm 2 s ahead and spins. The restart is the watchdog running out,
- * then the alarm powering the camera back up, so nothing may kick the
- * watchdog once 0x1fbac runs. Its two kickers: this task's 0x6000 tick,
- * blocked in the wait below, and uvc_task while the webcam is up, whose kick
- * src/wdt.S skips once 0x1fbac has started. Returns only when refused or
- * still running after the wait, logging "reboot X": X = the unmount error,
- * 3 = busy, 2 = post failed, 1 = still running; the AP task then spins in
- * 0x1fbac until the Off switch. */
+/* Restart through stock's 0x1fbac, called here in the peripheral task. It
+ * does not cut the power: it sets the SoC watchdog to period 7 and sets
+ * [0x12166e], arms an RTC alarm 2 s ahead and spins. The watchdog runs out
+ * and resets the camera, and the alarm powers it back up. The watchdog has two
+ * kickers: this task's 0x6000 tick, which never runs again once we spin in
+ * 0x1fbac, and uvc_task while the webcam is up, whose kick src/wdt.S skips
+ * once [0x12166e] is set. So the restart does not depend on the app task:
+ * stock calls 0x1fbac from the app on 0x7007, and in a drive session with the
+ * switch on Video the app never got to it. The kick right before starts the
+ * watchdog's time there, so the alarm is armed long before it runs out.
+ * Skipped from stock's 0x7007 case: the video state's 0x353f4, which only
+ * clears the recording time on the display. Returns only when refused or when
+ * the unmount fails, logging "reboot X": X = 3 busy, else the unmount
+ * error. */
 void act_reboot(void)
 {
 	s32 r;
@@ -165,16 +167,14 @@ void act_reboot(void)
 	v5_log("reboot");
 	log_flush();
 	r = fw_unmount(DRIVE_G);
-	if (!r) {
-		/* keeps the payload off the unmounted card; the tick remounts if we are still here */
-		st.card_stale = 1;
-		r = 2;
-		if (!apq_post(MSG_REBOOT, 0, 0, 1)) {
-			fw_delay(REBOOT_WAIT);
-			r = 1;
-		}
+	if (r) {
+		v5_log("reboot %x", r);
+		return;
 	}
-	v5_log("reboot %x", r);
+	/* keeps the payload off the unmounted card until the reset */
+	st.card_stale = 1;
+	fw_wdt_kick();
+	fw_reboot();
 }
 
 /* From v5_tick after the host ejected the drive, once the tick has remounted

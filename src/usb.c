@@ -6,6 +6,8 @@
  * the stock VBUS poll, and usb_apply from v5_tick in the same task;
  * v5_eject_cb runs in the USB task. */
 
+#define STOP_WAIT 500 /* ms for uvc_task and the USB task to stop a stream (0x8008) */
+
 static const char *const pname[] = { "none", "drive", "webcam" };
 
 static u8 noted; /* last wanted personality usb_apply reported */
@@ -99,7 +101,17 @@ void v5_usb_plugin(void)
 /* G2: state 1, remove edge, in place of the stock bl 0xbdf04. The webcam
  * uninit turns the PHY off itself (0x3ef50). A drive gets stock's PHY off
  * only: its uninit 0x8002 would run the SD driver uninit under the camera's
- * FS. */
+ * FS.
+ *
+ * A stream still running when the cable goes is stopped first, the way the
+ * host's alt 0 stops it: the uninit's own encoder stop (0x3ec00) frees the
+ * frame buffers (0x17900) while uvc_task may still hold one for EP5, which
+ * turned the camera off. A pulled cable gives only a bus suspend, which stock
+ * does not act on (0x52428), and an EP5 transfer that never completes.
+ * 0x3e5e0(0) is stock's alt-setting callback (registered by 0x528dc, called
+ * at 0x52424 on SET_INTERFACE): it posts the stop to uvc_task, which hands
+ * its frame back to the encoder and posts 0x8008, whose stop the USB task
+ * runs before the uninit posted here. */
 void v5_usb_unplug(void)
 {
 	u8 was = st.usb_active;
@@ -107,8 +119,14 @@ void v5_usb_unplug(void)
 	st.usb_active = USB_NONE;
 	st.usb_pending = 0;
 	v5_log("usb off %s", name(was));
-	if (was == USB_WEBCAM && usb_post(USB_UVC_UNINIT))
-		return;
+	if (was == USB_WEBCAM) {
+		if (W_VS_ALT) {
+			fw_uvc_alt(0);
+			fw_delay(STOP_WAIT);
+		}
+		if (usb_post(USB_UVC_UNINIT))
+			return;
+	}
 	fw_usb_hw_off();
 }
 

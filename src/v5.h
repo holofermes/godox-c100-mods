@@ -123,7 +123,7 @@ void act_display(u8 on);
 void act_led(u8 on);
 void act_sound(u8 on);
 int reboot_busy(void); /* capturing, recording or not in photo/video: act_reboot refuses */
-void act_reboot(void); /* returns only when refused, or still running 10 s after the post */
+void act_reboot(void); /* returns only when refused or the unmount fails, else restarts */
 s32 act_sound_gate(s32 id);    /* 1 = let stock play, 0 = return -1 like stock invalid id */
 void act_long_select(void);    /* the C side of the K1 gesture */
 void act_tick(void);           /* from v5_tick every pass: LCD, LED, chime, handback */

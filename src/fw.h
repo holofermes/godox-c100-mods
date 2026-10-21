@@ -87,10 +87,13 @@
 #define fw_seg_refresh FW(void, 0x21318)
 #define fw_rtc_read FW(s32, 0x4536c, s32 *) /* out[0..3] = sec min hour days, <0 = failed */
 #define fw_reboot FW(void, 0x1fbac)          /* watchdog period 7, RTC alarm +2 s, spins (act.c) */
+#define fw_wdt_kick FW(void, 0x47014)        /* 0xa005 to 0xd000002c; stock kicks at 0x22230 and 0x3e6d4 */
 #define fw_power_off FW(void, 0x262e8, u32)
 #define fw_stock_eject_cb FW(u32, 0xbe2d4, u32) /* replaced by eject_stub at 0xe0978 */
 #define fw_usb_vbus_tick FW(void, 0x1f3d4)      /* stock VBUS edge poll, peripheral task */
 #define fw_usb_hw_off FW(void, 0xbdf04)         /* stock: tear the device down in place */
+#define fw_uvc_alt FW(void, 0x3e5e0, u32)       /* UVC alt-setting callback: alt 0 posts the stream stop to uvc_task */
+#define W_VS_ALT FW32(0x123d3c)                 /* EP5 alt setting, stored by 0x3e5e0: 3 while a host streams */
 #define fw_apq_flush FW(void, 0x644, void *)    /* drop pending app messages */
 
 #define PIN_43 43 /* green status LED, lit at 1 (seen on the camera) */
