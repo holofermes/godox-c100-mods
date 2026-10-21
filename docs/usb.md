@@ -125,7 +125,9 @@ tested on the camera.
   same power cycle has failed so far (above). The webcam boot relies on the reboot resetting the
   USB side [inferred]; that is the first thing the camera test has to show.
 - In Photo this is the same path as `usb_photo=webcam`, also not tested on the camera. Metering
-  is a sub-mode of the photo state (0x2ebe4), so the reboot is not refused there [inferred].
+  most likely runs in the video state: on V1.1.3 a Metering start picks the video state, and on
+  V1.1.6 the photo state's handler for the metering message (0x2ebe4) only queues it again
+  [inferred]. The reboot is allowed in both states, so it is not refused there.
 
 ## One boot as the drive
 
