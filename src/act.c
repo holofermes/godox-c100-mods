@@ -5,7 +5,7 @@
  * (docs/hooks.md, docs/usb.md). */
 
 #define CHIME_LATE 15000     /* ms since boot; later than this a held chime is dropped */
-#define REBOOT_WAIT 3000     /* ms to wait for the 0x7007 power cut */
+#define REBOOT_WAIT 10000    /* ms to wait for the watchdog reset after the 0x7007 post */
 #define HANDBACK_SETTLE 2000 /* ms for a posted capture or record to show as busy */
 
 /* the gpio_set and v5_get95 stubs in stubs.S read struct v5_led with ldrb/strb
@@ -144,11 +144,16 @@ int reboot_busy(void)
 }
 
 /* Posted rather than calling fw_reboot: every stock caller of 0x1fbac runs
- * in the AP task, the video state stops its pipeline (0x353f4) before it, and
- * if the power does not drop (as it might with VBUS present) the endless loop
- * at its end parks the AP task while the peripheral task keeps the keys and
- * the Off switch. Returns only when refused or still powered, logging
- * "reboot X": X = the unmount error, 3 = busy, 2 = post failed, 1 = still on. */
+ * in the AP task, and the video state stops its pipeline (0x353f4) before it.
+ * 0x1fbac does not cut the power: it sets the SoC watchdog to period 7, arms
+ * an RTC alarm 2 s ahead and spins. The restart is the watchdog running out,
+ * then the alarm powering the camera back up, so nothing may kick the
+ * watchdog once 0x1fbac runs. Its two kickers: this task's 0x6000 tick,
+ * blocked in the wait below, and uvc_task while the webcam is up, whose kick
+ * src/wdt.S skips once 0x1fbac has started. Returns only when refused or
+ * still running after the wait, logging "reboot X": X = the unmount error,
+ * 3 = busy, 2 = post failed, 1 = still running; the AP task then spins in
+ * 0x1fbac until the Off switch. */
 void act_reboot(void)
 {
 	s32 r;

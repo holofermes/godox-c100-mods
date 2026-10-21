@@ -84,6 +84,7 @@ A_CS_ENTER, A_CS_EXIT, A_DELAY, A_CSW = 0x5C984, 0x5C9A4, 0x5E210, 0x4D9D4
 A_LUN_REG, A_START_STOP, A_UART_PUT = 0x4EA70, 0x4E8DC, 0x48F14
 A_NV_READ, A_DCLEAN, A_DCLEAN_LINE = 0x594B8, 0x40158, 0x40160  # nv_read_page; clean D range, its per-line mcr
 A_SD_UNINIT = 0xB3844
+A_WDT_KICK = 0x47014  # 0xa005 to 0xd000002c, the SoC watchdog kick
 A_PRINT_BUF, GAP, GAP_END = 0x124478, 0xE6968, 0xE8000
 
 # stock variables
@@ -188,6 +189,7 @@ class Machine:
             (A_REBOOT, "reboot"),
             (A_CSW, "csw"),
             (A_UART_PUT, "uart"),
+            (A_WDT_KICK, "wdt_kick"),
         ):
             self.stub(a, n, lambda m, *r: None)
         self.stub(A_OPEN, "open", self.f_open)

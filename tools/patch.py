@@ -123,6 +123,11 @@ XU_HOOKS = [
     (0x50980, "b423d4e1", "b", "xu_in", "UVC class IN setup: ldrh r2,[r4,#0x34] -> the XU's GET requests"),
     (0x52570, "010056e3", "b", "xu_data", "SET_CUR data stage: cmp r6,#1 -> the XU's line into the mailbox"),
 ]
+# The restart (src/wdt.S, docs/usb.md): uvc_task's watchdog kick, skipped once stock's 0x1fbac has
+# started a restart. uvc_task exists only while the webcam is up. Not in the canary.
+WDT_HOOKS = [
+    (0x3E6D4, "4e2200eb", "bl", "wdt_uvc_kick", "uvc_task watchdog kick: bl 0x47014, skipped once 0x1fbac ran"),
+]
 # APMode 0x106's target 1920x1080 (full sensor, no crop); [0xf894] is a stock literal 0x438,
 # 1080 has no ARM immediate. Then the frame sizes: the second path gets the host's frame
 # (v6_size, r0 = W and r3 = H, so the second ldrh goes), the display size follows the second
@@ -224,7 +229,7 @@ HEAP = (
 )
 DATA = [STACK4K, HEAP] if CANARY else [G4, STACK4K, HEAP, *V6_DATA]
 if not CANARY:
-    HOOKS += V6_HOOKS + XU_HOOKS
+    HOOKS += V6_HOOKS + XU_HOOKS + WDT_HOOKS
 
 # Words that become the address of a gap symbol, plus an offset. The MSC eject callback word
 # (SD LUN ops +0x30): stock reaches it with blx r2 at 0x4e914. eject_stub is ARM, so bit 0

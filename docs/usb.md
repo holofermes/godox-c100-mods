@@ -62,6 +62,33 @@ deleted the file and ran it, and the host saw the card again about 4 s after the
 `display on` and `led on` switched the LCD and LED; `reboot` restarted the camera, and with the
 cable still in it came back as the drive about 5 s after the eject [seen].
 
+## Restart
+
+`reboot`, `webcam`, `drive` and the `webcam MIN` timer restart the camera the same way
+(`act_reboot` in `src/act.c`): flush `LOG.TXT`, unmount the card, post 0x7007 to the app, wait up
+to 10 s. The app runs stock's 0x1fbac, which does not cut the power: it sets the SoC watchdog to
+period 7 (0xd0000028), sets [0x12166e], arms an RTC alarm 2 s ahead and spins [read]. The watchdog
+runs out and resets the camera, and the alarm powers it back up [inferred]. So nothing may kick the
+watchdog once 0x1fbac runs. Stock kicks it in two places [read]: the peripheral task's tick, which
+`act_reboot` keeps blocked, and `uvc_task` (0x3e6d4), every second while the webcam is up. The
+patch skips that second kick while [0x12166e] is set (`src/wdt.S`), which 0x1fbac sets and never
+clears.
+
+- With the webcam up and no skip, `drive` from the PC did not restart: the RTC alarm fired with
+  the camera still running and `LOG.TXT` showed `reboot 1` [seen]. In a drive session, with no
+  `uvc_task`, `reboot` restarts within seconds [seen]. The skip is not yet tested on the camera.
+- Tearing the webcam down first (the uninit 0x8005) while a host streams turns the camera off
+  [seen]. The uninit stops the encoder (0x3ec00), which frees the frame buffers (0x17900); stock
+  does that only after the host stopped the stream and `uvc_task` handed its frame back [read],
+  the uninit does it with a frame in flight. The camera stopped within a second, and the watchdog
+  reset it with no alarm armed [inferred].
+- `reboot 1` after the 10 s means the restart did not come. The app is then stuck in 0x1fbac
+  until the Off switch: no mode changes, capture or recording, and no power-off of its own; the
+  card and `LOG.TXT` still work.
+- `LOG.TXT`: `reboot`; `reboot 3` refused (capture, recording, or not in the photo or video
+  state), `reboot X` the unmount failed with error X, `reboot 2` the post failed, `reboot 1` no
+  restart.
+
 ## One boot as the webcam
 
 CMD.TXT `webcam [MIN]` restarts the camera as the webcam whatever the switch; with MIN, 1 to
@@ -106,8 +133,9 @@ docs/webcam.md). Not yet tested on the camera.
   state: its state word 0x13288c has one writer, the state dispatcher 0x29d64, and no webcam
   message changes it. Streaming sets neither the capture nor the record flags, and the card stays
   the camera's, so the unmount works. The 0x7007 handlers (video 0x370a4, photo 0x2ec1c) wait for
-  nothing in the USB task. Whether the drive comes up after a reboot from a running stream, with
-  the cable still in, is for the camera test.
+  nothing in the USB task. On the camera the restart itself failed with the webcam up (Restart,
+  above); fixed, not yet tested. Whether the drive then comes up with the cable still in is for the
+  camera test.
 - `LOG.TXT`: `drive` and `reboot` from the command, after `xu: drive` when it came from the PC;
   `drive: boot`; `drive: rm fail`, `drive: bad file`, `drive: write fail`, `drive: marker
   removed`.

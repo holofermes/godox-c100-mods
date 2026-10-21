@@ -86,7 +86,7 @@
 #define fw_play_effect FW(s32, 0x22a80, s32)
 #define fw_seg_refresh FW(void, 0x21318)
 #define fw_rtc_read FW(s32, 0x4536c, s32 *) /* out[0..3] = sec min hour days, <0 = failed */
-#define fw_reboot FW(void, 0x1fbac)          /* RTC-alarm power-off, never returns */
+#define fw_reboot FW(void, 0x1fbac)          /* watchdog period 7, RTC alarm +2 s, spins (act.c) */
 #define fw_power_off FW(void, 0x262e8, u32)
 #define fw_stock_eject_cb FW(u32, 0xbe2d4, u32) /* replaced by eject_stub at 0xe0978 */
 #define fw_usb_vbus_tick FW(void, 0x1f3d4)      /* stock VBUS edge poll, peripheral task */

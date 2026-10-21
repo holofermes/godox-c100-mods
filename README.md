@@ -121,7 +121,8 @@ Commands, one per line, in the card root. Checked about every 3 s while the came
     display on|off      also: led, sound
     set KEY=VALUE       a C100.TXT line, applied now
     reboot              flush the log and restart, unless recording or capturing; with a cable
-                        in, USB comes back by itself
+                        in, USB comes back by itself. With the webcam up, not yet tested on the
+                        camera
     webcam [MIN]        restart as the webcam, whatever the switch, for that boot only; with
                         MIN (1 to 1440), restart again MIN minutes later and follow the switch
                         (docs/usb.md). Not yet tested on the camera

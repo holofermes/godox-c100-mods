@@ -125,6 +125,7 @@ HOOKMAP = [
     ("XU", 0x507F0, "3430d4e5", "b", "xu_out"),
     ("XU", 0x50980, "b423d4e1", "b", "xu_in"),
     ("XU", 0x52570, "010056e3", "b", "xu_data"),
+    ("WD", 0x3E6D4, "4e2200eb", "bl", "wdt_uvc_kick"),
 ]
 LOADLEN, LOADLEN_SHIP = 0x1002E, 0x741
 SIZE, TEST_PAD = 1841152, 0x200000  # tools/patch.py: a test-only build is padded with 0xFF
@@ -830,7 +831,7 @@ def t_reboot(h):
         not any(t[0] in ("open", "write", "stat", "unlink", "rename") for t in tr[iu:]),
         "no file call after the unmount",
     )
-    h.eq(stv(m, ST_STALE), 1, "card marked stale while waiting for the power cut")
+    h.eq(stv(m, ST_STALE), 1, "card marked stale while waiting for the restart")
     h.clean(m)
 
     print("  unmount fails (a file is open)")
@@ -862,6 +863,105 @@ def t_reboot(h):
     m.poke16(W_APP_STATE + 2, 0xBEEF)
     tick(m, 5000)
     h.eq([t[2] for t in m.calls("apq")], [0x7007], "state 0x102 with 0xbeef above it: reboot posted")
+
+
+def reboot_seq(m):
+    """the reboot-relevant calls in order: uninit post, waits, kicks, unmount, 0x7007"""
+    out = []
+    for t in m.trace:
+        if t[0] == "qsend":
+            out.append(f"qsend {t[2]:#x}")
+        elif t[0] == "apq":
+            out.append(f"apq {t[2]:#x}")
+        elif t[0] == "delay":
+            out.append(f"delay {t[1]}")
+        elif t[0] in ("wdt_kick", "unmount"):
+            out.append(t[0])
+    return out
+
+
+def t_reboot_webcam(h):
+    h.section = "reboot with the webcam up"
+    print("\nreboot with the webcam up: nothing posted to the USB task, then the 10 s wait for the watchdog")
+    want = ["unmount", "apq 0x7007", "delay 10000"]
+    for line in ("reboot", "drive", "webcam 5"):
+        m = boot(cmd=line + "\n", mode=1)
+        allow_reboot(m)
+        m.poke8(m.sym["st"] + ST_ACTIVE, 2)
+        tick(m, 5000)
+        h.eq(reboot_seq(m), want, f"`{line}`: unmount, 0x7007, then the 10 s wait, no 0x8005")
+        h.eq(stv(m, ST_ACTIVE), 2, f"`{line}`: the webcam left as it is")
+        h.clean(m)
+    for line in ("drive", "reboot"):
+        m = boot(mode=1)
+        allow_reboot(m)
+        m.poke16(W_APP_STATE, 0x101)
+        m.poke8(m.sym["st"] + ST_ACTIVE, 2)
+        m.poke32(VS_ALT, 3)
+        Ep0(m).set_cur(XU_SEL, XU_ID, line.encode().ljust(XU_LEN, b"\0"))
+        tick(m, 100)
+        h.eq(reboot_seq(m), want, f"xu `{line}` while streaming: the same")
+    m = boot(files={ONCE: "1\r\n"}, mode=0)
+    allow_reboot(m)
+    m.poke8(m.sym["st"] + ST_ACTIVE, 2)
+    tick(m, 0)
+    m.reset()
+    tick(m, 60000 + 10)
+    h.eq(reboot_seq(m), want, "`webcam 1` timer with the webcam up: the same")
+
+    print("  still running after the 10 s: `reboot 1`, the card back")
+    m = boot(cmd="reboot\n", mode=1)
+    allow_reboot(m)
+    m.poke8(m.sym["st"] + ST_ACTIVE, 2)
+    t0 = m.ticks
+    tick(m, 5000)
+    h.eq(m.ticks - t0, 5000 + 10000, "the tick came back 10 s after the post")
+    h.eq(stv(m, ST_STALE), 1, "card marked stale")
+    settle(m)
+    h.has("[v5] reboot\r\n", m=m)
+    h.has("[v5] reboot 1\r\n", m=m)
+    h.ok(stv(m, ST_STALE) == 0 and m.mounted, "the tick remounted the card")
+    h.clean(m)
+
+
+REBOOTING = 0x12166E  # set by stock 0x1fbac (0x1fbd8), never cleared; read by src/wdt.S
+
+
+def t_wdt_gate(h):
+    h.section = "uvc_task watchdog kick"
+    print("\nuvc_task's watchdog kick at 0x3e6d4: as stock, skipped once 0x1fbac has started a restart")
+    sp = STACK - 0x200
+    regs = {r: 0x7000 + i for i, r in enumerate(CALLEE_SAVED)}
+    m = Machine(IMAGE, SYM)
+    for flag, kicks, what in ((0, 1, "streaming, no restart"), (1, 0, "after 0x1fbac"), (0xFF, 0, "any nonzero")):
+        m.poke8(REBOOTING, flag)
+        m.reset()
+        m.call_arm(0x3E6D4, sp=sp, regs=regs, until=0x3E6D8)
+        h.eq(len(m.calls("wdt_kick")), kicks, f"[0x12166e] = {flag:#x} ({what}): {kicks} kick")
+        h.ok(all(m.reg(r) == v for r, v in regs.items()) and m.reg(UC_ARM_REG_SP) == sp, "r4-r11 and sp intact")
+
+    print("  stock 0x1fbac sets the flag before it spins; from then on uvc_task does not kick")
+    m = Machine(IMAGE, SYM)
+    m.uc.mem_map(0xD0000000, 0x1000)  # system control: the watchdog period and enable at +0x28
+    m.poke32(0xD0000028, 0x8005)  # as main left it (0x5f394..0x5f3a0)
+    m.put(0x1FBAC, m.raw[0x1FBAC + B : 0x1FBAC + B + 4])  # emu stubs 0x1fbac as "reboot": run the real one
+    for a, n in ((0x451D0, "rtc2"), (0x455C4, "alarm"), (0x4578C, "alarm_irq"), (0x44E80, "rtc_a"), (0x44EE8, "rtc_b")):
+        m.stub(a, n, lambda _m, *r: 0)
+    m.stub(0x44F9C, "rtc_reg", lambda _m, *r: 0)
+    m.task("ap")
+    m.call_arm(0x1FBAC, sp=sp, until=0x1FC90)  # its `b .`
+    n = m.names()
+    h.ok(
+        "alarm" in n and "alarm_irq" in n and m.u32(0xD0000028) == 0x8007,
+        "0x1fbac: watchdog period 7, RTC alarm armed, then its `b .`",
+        f"({n[-8:]}, {m.u32(0xD0000028):#x})",
+    )
+    h.eq(m.u8(REBOOTING), 1, "[0x12166e] = 1")
+    m.reset()
+    m.task("usb")
+    m.call_arm(0x3E6D4, sp=sp, regs=regs, until=0x3E6D8)
+    h.eq(m.calls("wdt_kick"), [], "uvc_task's next pass: no kick")
+    h.clean(m)
 
 
 # ---------------------------------------------------------------- sound
@@ -1739,7 +1839,7 @@ ONCE = "WEBCAM.ONE"
 
 
 def settle(m):
-    """after act_reboot came back with no power cut: the tick remounts the card, then flushes"""
+    """after act_reboot came back with no restart: the tick remounts the card, then flushes"""
     for ms in (6000, 2100, 2100):
         tick(m, ms)
 
@@ -2462,6 +2562,8 @@ TESTS = (
     t_log_bounds,
     t_cmd,
     t_reboot,
+    t_reboot_webcam,
+    t_wdt_gate,
     t_sound,
     t_hook_sound,
     t_led_gate,
