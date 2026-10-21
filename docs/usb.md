@@ -41,19 +41,29 @@ with the cable in gives no USB activity [inferred].
   system. A stream still running is stopped first the way the host's alt 0 stops it: stock's
   alt callback 0x3e5e0(0) has `uvc_task` hand its frame back and post the stream stop 0x8008,
   then 0.5 s later the uninit [read]. A pulled cable only gives the USB core a bus suspend,
-  which stock prints and ignores (0x52428), and the frame on EP5 never completes; the uninit
-  alone stops the encoder (0x3ec00), which frees the frame buffers (0x17900) under that frame.
-  Pulling the cable mid-stream that way turned the camera off [seen]; the stop first is not yet
-  tested on the camera.
+  which stock prints and ignores (0x52428), and the frame on EP5 never completes.
+- The uninit no longer closes the encoder (its `bl 0x3ec00` at 0x3ef4c is patched out). That close
+  sends 0x800000, which the encoder answers by freeing the UVC session (0x17900) but never
+  acknowledges (0x19864), so 0x3ec00 waited 5 s and left the session flagged open (`OSMbox ack
+  Fail!!!:0x800000`) [read, seen]; run under a frame still on EP5 it turned the camera off [seen].
+  After the host-style stop the session stays open, as after every host stop, and the next
+  stream reuses it.
+- Before a webcam init the patch clears bit 0x200 of 0xd0000008 (`src/uvc.S`, at the start of
+  usb_uvc_init). 0xbdf04, the USB block off that the uninit and every unplug run, sets 0x8200;
+  the drive init clears both (0xbdd40), the webcam init only 0x8000 (0xbdf3c) [read]. With 0x200
+  left set the init printed `rSYS_CTRL_NEW =0x29c` instead of 0x9c and the host saw a
+  full-speed device that answered nothing, so no webcam came back after an unplug [seen]. The
+  stop-first teardown and the re-init are not yet tested on the camera.
 - Before a webcam init the patch clears [0x124294], the SET_CONFIG callback a drive init leaves
   behind. Its only writer is 0x4d65c (called only from the drive init) and its only reader
   0x4d054, which skips NULL [read]. Without that, a webcam session after a drive init would
   enter state 2, power the sensor down and power off at unplug.
 - No auto power-off in states 1 and 2 (stock: state 2 only).
 
-Drive then webcam in one power cycle does not work: after a drive init (on a PC or a charger)
-and an unplug, the drive setup is never undone, and a webcam init does not replace it
-[inferred]. Power-cycle in between.
+Drive then webcam in one power cycle has not worked: after a drive init (on a PC or a charger)
+and an unplug, a webcam init did not enumerate. A drive unplug runs 0xbdf04 too, so the bit
+0x200 that the webcam init now clears may have been the cause [inferred]; not yet tested on the
+camera. Until then, power-cycle in between.
 
 ## Eject
 

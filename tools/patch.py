@@ -128,6 +128,17 @@ XU_HOOKS = [
 WDT_HOOKS = [
     (0x3E6D4, "4e2200eb", "bl", "wdt_uvc_kick", "uvc_task watchdog kick: bl 0x47014, skipped once 0x1fbac ran"),
 ]
+# Webcam teardown and re-init (src/uvc.S, docs/usb.md). usb_uvc_init (USB task, 0x8003) clears the
+# bit 0x200 that 0xbdf04 leaves in 0xd0000008, as the drive init does; the webcam uninit (0x8005,
+# posted only by the patch at a webcam unplug, after it stopped the stream the host's way) no
+# longer runs the encoder close 0x3ec00, which never gets a reply, frees the UVC session and leaves
+# its open flag set. Not in the canary.
+UVC_HOOKS = [
+    (0x3EDA4, "64fc01eb", "bl", "uvc_init_sysctl", "usb_uvc_init: bl 0xbdf3c -> clear 0xd0000008 bits 0x8200 first"),
+]
+UVC_DATA = [
+    (0x3EF4C + B, "2bffffeb", "0000a0e1", "webcam uninit 0x3ef48: bl 0x3ec00 (encoder close) -> nop"),
+]
 # APMode 0x106's target 1920x1080 (full sensor, no crop); [0xf894] is a stock literal 0x438,
 # 1080 has no ARM immediate. Then the frame sizes: the second path gets the host's frame
 # (v6_size, r0 = W and r3 = H, so the second ldrh goes), the display size follows the second
@@ -227,9 +238,9 @@ HEAP = (
     struct.pack("<I", HEAP_LIT_NEW).hex(),
     f"heap-size literal {HEAP_LIT_OLD:#x} -> {HEAP_LIT_NEW:#x}: heap region ends at {HEAP_LIT_NEW + 0x42000:#x}",
 )
-DATA = [STACK4K, HEAP] if CANARY else [G4, STACK4K, HEAP, *V6_DATA]
+DATA = [STACK4K, HEAP] if CANARY else [G4, STACK4K, HEAP, *V6_DATA, *UVC_DATA]
 if not CANARY:
-    HOOKS += V6_HOOKS + XU_HOOKS + WDT_HOOKS
+    HOOKS += V6_HOOKS + XU_HOOKS + WDT_HOOKS + UVC_HOOKS
 
 # Words that become the address of a gap symbol, plus an offset. The MSC eject callback word
 # (SD LUN ops +0x30): stock reaches it with blx r2 at 0x4e914. eject_stub is ARM, so bit 0

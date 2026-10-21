@@ -16,8 +16,9 @@ The stock image leaves 5,784 B of RAM unused, too little for all of it. So the c
   it. It holds only what runs before the features are switched on: the ARM entry stubs
   (`src/stubs.S`), the overlay loader and the state the stubs read (`src/loader.c`), and, linked
   last, the webcam fixes and the webcam's config descriptor (`src/v6.S`), the extension unit's
-  EP0 code and mailbox (`src/xu.S`), and the skip of `uvc_task`'s watchdog kick during a restart
-  (`src/wdt.S`). 2,396 B of it are used.
+  EP0 code and mailbox (`src/xu.S`), the skip of `uvc_task`'s watchdog kick during a restart
+  (`src/wdt.S`), and the webcam init's clear of bit 0x200 (`src/uvc.S`). 2,416 B of it are
+  used.
 - **Overlay**, RAM 0xFF0000..0x1000000, the top 64 KB of the 16 MiB of RAM. Stock gives this to
   the FreeRTOS heap; the patch lowers the heap-size literal at 0x5f46c from 0xFBDFFF to 0xFADFFF,
   so the heap ends at 0xFEFF80 instead of 0xFFFF80; no stock code or data refers to the range
@@ -99,8 +100,8 @@ after that to the overlay's `v5_eject_cb`.
 ## Hooks
 
 Ids: D the display-refresh tick, G USB and VBUS, K keys, L the LED pins, S sound, V6 the webcam
-fixes, sizes and descriptor, XU the extension unit, WD the watchdog kick; LOG, SET, STACK and HEAP
-are named for what they patch. There is no G5.
+fixes, sizes and descriptor, XU the extension unit, WD the watchdog kick, UV the webcam teardown
+and re-init; LOG, SET, STACK and HEAP are named for what they patch. There is no G5.
 
 | id | RAM | stock | replaced by | runs |
 | --- | --- | --- | --- | --- |
@@ -129,6 +130,8 @@ are named for what they patch. There is no G5.
 | XU | 0x50980, 0x507f0 | class GET and SET setup, `ldrh`/`ldrb` of wIndex | `xu_in`, `xu_out`: unit 6's requests, else stock | host request, webcam mode |
 | XU | 0x52570 | SET_CUR data stage, `cmp r6, #1` | `xu_data`: the line into the mailbox, else stock | host request, webcam mode |
 | WD | 0x3e6d4 | `bl 0x47014`, `uvc_task`'s watchdog kick | `wdt_uvc_kick`: no kick once 0x1fbac set [0x12166e] (docs/usb.md) | `uvc_task`, webcam mode |
+| UV | 0x3eda4 | `bl 0xbdf3c` in usb_uvc_init | `uvc_init_sysctl`: clear 0xd0000008 bits 0x8200, then 0xbdf3c | webcam init, USB task |
+| UV | 0x3ef4c | `bl 0x3ec00` in the webcam uninit | nop: no encoder close (docs/usb.md) | webcam unplug, USB task |
 
 The peripheral task stack goes to 4 KB because the patch's card writes run in that task and a
 static bound with stock FAT and SD frames comes to at most 3.1 KB, on SD error paths. The stack
@@ -145,25 +148,26 @@ their on/off check, the stack size, the heap literal, the loader) and replaces t
 function: on each mount it appends `canary 2 ovl <crc> chime <n>` to `LOG.TXT`, where `<crc>` is
 the overlay CRC the loader checked (build.sh prints it) and `<n>` is the sound id the sound hook
 caught (2 when it caught the startup chime). It never switches the features on. It leaves out the
-webcam fixes, descriptor and extension unit and the watchdog-kick skip (`src/v6.S`, `src/xu.S`,
-`src/wdt.S`, the V6, XU and WD rows) and G4.
+webcam fixes, descriptor and extension unit, the watchdog-kick skip and the webcam re-init
+(`src/v6.S`, `src/xu.S`, `src/wdt.S`, `src/uvc.S`, the V6, XU, WD and UV rows) and G4.
 
 The full build's gap matches the canary's 321 words of stubs, loader, literal pools and loader data
 except 14 words: 12 literal words, each the address of something in the overlay (the C entry
 points, `led`, the overlay's bounds and entry), and the two words of the overlay's length and CRC.
 Every gap symbol, `st` included, is at the same address. So a canary run on the camera covers the
 stub and loader code the full build ships, the heap reservation, the flash read, the cache
-maintenance and the call into the overlay. It does not cover `src/v6.S`, `src/xu.S` and
-`src/wdt.S`, which are linked after all of that, so they move nothing the canary proved. The webcam fixes run on
+maintenance and the call into the overlay. It does not cover `src/v6.S`, `src/xu.S`,
+`src/wdt.S` and `src/uvc.S`, which are linked after all of that, so they move nothing the canary
+proved. The webcam fixes run on
 left/right, record start and stream start without waiting for the features to switch on, so they
 can run before the first mount; they read only stock bytes (0x123d3c, 0xe3b2f), `v6_size` writes
 only the zoom bytes, and they branch to stock code. The extension unit's code runs only on a host
 request in webcam mode; it reads the request, [0x123d34], `st.booted` and its mailbox, writes only
 the mailbox and stock's error byte 0x12440a, calls nothing and branches back to stock code. The
-watchdog-kick skip runs only in `uvc_task` and reads one stock byte. They were checked in the
-emulator and the disassembly only. Redo the canary after any change to
+watchdog-kick skip runs only in `uvc_task` and reads one stock byte; the re-init clear runs only
+in the webcam init. They were checked in the emulator and the disassembly only. Redo the canary after any change to
 `src/stubs.S`, `src/loader.c`, the load length, the stack size or the heap literal. Check changes
-to `src/v6.S`, `src/xu.S` and `src/wdt.S` in the emulator.
+to `src/v6.S`, `src/xu.S`, `src/wdt.S` and `src/uvc.S` in the emulator.
 
 The canary was flashed on a camera, booted and logged, flashed stock from itself, then was
 flashed again from stock [seen].
@@ -185,8 +189,9 @@ of its requests and refusals, 1,875 other class requests answered as on the base
 command taken from the mailbox, while streaming too. The restart: unmount, one kick and stock's
 0x1fbac called from the peripheral task in every case (webcam up, streaming, a drive session in
 Video after an eject), and 0x1fbac run to its `b .`, after which `uvc_task` no longer kicks the
-watchdog. The webcam unplug: a running stream stopped through 0x3e5e0(0) before the uninit. 820
-checks for the full build, 144 for the canary. They do not model the scheduler, IRQs, the MMU and caches (the cache instructions run as
+watchdog. The webcam unplug: a running stream stopped through 0x3e5e0(0) before the uninit, the
+uninit without the encoder close, and the re-init leaving 0xd0000008 as at boot. 831 checks for
+the full build, 144 for the canary. They do not model the scheduler, IRQs, the MMU and caches (the cache instructions run as
 no-ops; the calls are checked), real SD, flash or USB behaviour, or failures of malloc, read,
 write or the RTC.
 

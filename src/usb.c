@@ -104,14 +104,17 @@ void v5_usb_plugin(void)
  * FS.
  *
  * A stream still running when the cable goes is stopped first, the way the
- * host's alt 0 stops it: the uninit's own encoder stop (0x3ec00) frees the
- * frame buffers (0x17900) while uvc_task may still hold one for EP5, which
- * turned the camera off. A pulled cable gives only a bus suspend, which stock
+ * host's alt 0 stops it. A pulled cable gives only a bus suspend, which stock
  * does not act on (0x52428), and an EP5 transfer that never completes.
  * 0x3e5e0(0) is stock's alt-setting callback (registered by 0x528dc, called
  * at 0x52424 on SET_INTERFACE): it posts the stop to uvc_task, which hands
  * its frame back to the encoder and posts 0x8008, whose stop the USB task
- * runs before the uninit posted here. */
+ * runs before the uninit posted here. The uninit itself no longer closes the
+ * encoder (tools/patch.py nops its 0x3ec00): that close freed the frame
+ * buffers under a frame still on EP5, which turned the camera off, never got
+ * a reply and left the session flagged open. The stream stopped this way
+ * leaves the session open, as every host stop does, and the next stream
+ * reuses it. */
 void v5_usb_unplug(void)
 {
 	u8 was = st.usb_active;

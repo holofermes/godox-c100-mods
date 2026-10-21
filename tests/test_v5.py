@@ -127,6 +127,8 @@ HOOKMAP = [
     ("XU", 0x50980, "b423d4e1", "b", "xu_in"),
     ("XU", 0x52570, "010056e3", "b", "xu_data"),
     ("WD", 0x3E6D4, "4e2200eb", "bl", "wdt_uvc_kick"),
+    ("UV", 0x3EDA4, "64fc01eb", "bl", "uvc_init_sysctl"),
+    ("UV", 0x3EF4C, "2bffffeb", "bytes", "0000a0e1"),
 ]
 LOADLEN, LOADLEN_SHIP = 0x1002E, 0x741
 SIZE, TEST_PAD = 1841152, 0x200000  # tools/patch.py: a test-only build is padded with 0xFF
@@ -1220,6 +1222,66 @@ def t_unplug_stream(h):
     m.reset()
     m.call_arm(0x1F530, sp=STACK - 0x200, until=0x1F534)
     h.eq([t[0] for t in m.trace if t[0] in ("msgq_send", "delay", "qsend", "usb_off")], ["usb_off"], "PHY off only")
+
+
+SYS_CTRL = 0xD0000008  # rSYS_CTRL_NEW, printed by 0x5292c; 0xbdf04 sets 0x8200 (0xbdf2c)
+
+
+def uninit_run(img):
+    """the webcam uninit 0x3ef48 with the RTOS and USB-block calls stubbed and the encoder close
+    0x3ec00 left as it is: the calls it makes, and the encoder session flag after"""
+    m = Machine(img, SYM)
+    enc = m.alloc(0x10)
+    m.poke32(0xE11F0, enc)
+    m.poke32(enc + 4, 0x80)  # the UVC encode session open (0x3eb1c sets it, 0xee0c reads it)
+    m.poke32(0x1317E4, 0xA07000)  # encoder command queue
+    m.poke32(0x1317F4, 0xA07100)  # its reply queue
+    m.poke32(0x132B4C, 0xA0B0C0)  # uvc_task
+    m.poke32(0x132B48, 0xA0D0E0)  # its queue
+    for a, n in (  # 0xbdf04 is the emulator's usb_off stub
+        (0x4D904, "ep0_clear"),
+        (0x5DD54, "task_suspend"),
+        (0x5C110, "delay_ms"),
+        (0x5DBDC, "task_delete"),
+        (0x5D094, "queue_reset"),
+        (0x5D6E4, "queue_delete"),
+        (0x5D484, "queue_receive"),  # returns 0: the encoder never replies to 0x800000 (0x19864)
+    ):
+        m.stub(a, n, lambda _m, *r: 0)
+    m.reset()
+    m.call_arm(0x3EF48, sp=STACK - 0x200)
+    return m, m.u32(enc + 4) & 0x80
+
+
+def t_uvc_reinit(h):
+    h.section = "webcam teardown and re-init"
+    print("\nwebcam re-init after 0xbdf04: bit 0x200 of 0xd0000008 cleared; the uninit leaves the encoder alone")
+    got = {}
+    for name, img in (("base", BASE), ("built", IMAGE)):
+        m = Machine(img, SYM)
+        m.uc.mem_map(0xD0000000, 0x1000)
+        m.poke32(SYS_CTRL, 0x9C | 0x8200)  # 0x9c at the boot's first init, |= 0x8200 by 0xbdf04
+        m.call_arm(0x3EDA4, sp=STACK - 0x200, until=0x3EDA8)  # usb_uvc_init's first call
+        got[name] = m.u32(SYS_CTRL)
+    h.eq(got["base"], 0x29C, "stock usb_uvc_init leaves 0x29c, as the camera printed after the replug")
+    h.eq(got["built"], 0x9C, "patched: 0x9c, the value of the boot's first init")
+
+    m, flag = uninit_run(BASE)
+    h.eq(
+        ([t[2] for t in m.calls("qsend")], flag),
+        ([0x800000], 0x80),
+        "stock uninit: 0x800000 to the encoder (0x17900 frees the session), no reply, flag left set",
+    )
+    m, flag = uninit_run(IMAGE)
+    n = m.names()
+    h.eq((m.calls("qsend"), flag), ([], 0x80), "patched uninit: nothing to the encoder, the session left open")
+    h.eq(
+        [x for x in n if x in ("usb_off", "ep0_clear", "task_suspend", "task_delete", "queue_delete")],
+        ["usb_off", "ep0_clear", "task_suspend", "task_delete", "queue_delete"],
+        "the rest of the uninit as stock: USB block off, EP0 state, uvc_task suspended and deleted, its queue",
+    )
+    h.eq(m.u32(VS_ALT), 0, "VS alt 0")
+    h.clean(m)
 
 
 def t_usb_busy_defers(h):
@@ -2615,6 +2677,7 @@ TESTS = (
     t_hook_k1,
     t_usb_plugin,
     t_unplug_stream,
+    t_uvc_reinit,
     t_usb_busy_defers,
     t_eject_cb,
     t_hook_eject,

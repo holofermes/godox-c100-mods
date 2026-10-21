@@ -28,9 +28,9 @@ from unicorn import UcError
 from unicorn.arm_const import UC_ARM_REG_R3, UC_ARM_REG_R4, UC_ARM_REG_R5, UC_ARM_REG_SP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# the full hook map without G4, the V6, XU and WD rows (tools/patch.py with CANARY=1); the 4 KB
+# the full hook map without G4, the V6, XU, WD and UV rows (tools/patch.py with CANARY=1); the 4 KB
 # stack and heap rows are in both
-CANARY_MAP = [r for r in HOOKMAP if r[0] not in ("G4", "XU", "WD") and not r[0].startswith("V6")]
+CANARY_MAP = [r for r in HOOKMAP if r[0] not in ("G4", "XU", "WD", "UV") and not r[0].startswith("V6")]
 
 
 def line(m, chime):
