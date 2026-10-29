@@ -11,7 +11,7 @@
  * markers at once: both are deleted and the drive wins. All of it is overlay
  * code that runs after the update check. */
 
-#define P_ONCE "G:\\WEBCAM.ONE"
+#define P_WEBCAM "G:\\WEBCAM.ONE"
 #define P_DRIVE "G:\\DRIVE.ONE"
 #define ONCE_MAX 16   /* bytes; a longer file is not ours */
 #define MIN_MAX 1440  /* minutes: one day */
@@ -91,10 +91,10 @@ void webcam_cmd(s32 min)
 		return;
 	}
 	len = v5_fmt(buf, sizeof(buf), "%d\r\n", min);
-	if (once_write(P_ONCE, "webcam", buf, len))
+	if (once_write(P_WEBCAM, "webcam", buf, len))
 		return;
 	v5_log("webcam %d", min);
-	once_reboot(P_ONCE, "webcam");
+	once_reboot(P_WEBCAM, "webcam");
 }
 
 /* the same for `drive`; the marker's text is not read back */
@@ -157,7 +157,7 @@ void once_boot(void)
 		drive_forced = 1;
 		v5_log("drive: boot");
 	}
-	text = once_take(P_ONCE, "webcam");
+	text = once_take(P_WEBCAM, "webcam");
 	if (!text)
 		return;
 	n = webcam_min(text);

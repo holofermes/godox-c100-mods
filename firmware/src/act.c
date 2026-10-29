@@ -149,9 +149,10 @@ int reboot_busy(void)
  * kickers: this task's 0x6000 tick, which never runs again once we spin in
  * 0x1fbac, and uvc_task while the webcam is up, whose kick src/wdt.S skips
  * once [0x12166e] is set. So the restart does not depend on the app task:
- * stock calls 0x1fbac from the app on 0x7007, and in a drive session with the
- * switch on Video the app never got to it. The kick right before starts the
- * watchdog's time there, so the alarm is armed long before it runs out.
+ * stock calls 0x1fbac from the app on 0x7007, and after the host's eject in a
+ * drive session with the switch on Video the app does not run it. The kick
+ * right before starts the watchdog's time there, so the alarm is armed long
+ * before it runs out.
  * Skipped from stock's 0x7007 case: the video state's 0x353f4, which only
  * clears the recording time on the display. Returns only when refused or when
  * the unmount fails, logging "reboot X": X = 3 busy, else the unmount

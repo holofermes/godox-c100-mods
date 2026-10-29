@@ -17,7 +17,9 @@
 @     the way out.
 @   - a site entered by BL returns with pop {r4, pc} against its own push,
 @     with bx lr, or by tail-branching to the displaced callee.
-@   - sp is 8-aligned before every C call.
+@   - sp is 8-aligned at every C call. Stock keeps sp 8-aligned at its calls,
+@     the stock frame at each hook site is a multiple of 8 B, and so is every
+@     stub's push; the D1, G1, G2 and G3b stubs also round sp down.
 @   - C preserves r4-r11, so a stock value live across the hook survives.
 @   - until armed, a stub runs only the stock instruction it displaced (S1
 @     also parks the power-on chime) and enters no C. SET is the exception:

@@ -109,10 +109,10 @@ void v5_usb_plugin(void)
  * 0x3e5e0(0) is stock's alt-setting callback (registered by 0x528dc, called
  * at 0x52424 on SET_INTERFACE): it posts the stop to uvc_task, which hands
  * its frame back to the encoder and posts 0x8008, whose stop the USB task
- * runs before the uninit posted here. The uninit itself no longer closes the
- * encoder (tools/patch.py nops its 0x3ec00): that close freed the frame
- * buffers under a frame still on EP5, which turned the camera off, never got
- * a reply and left the session flagged open. The stream stopped this way
+ * runs before the uninit posted here. The uninit itself does not close the
+ * encoder (tools/patch.py nops its 0x3ec00): stock's close frees the frame
+ * buffers under a frame still on EP5, which turns the camera off, gets no
+ * reply and leaves the session flagged open. The stream stopped this way
  * leaves the session open, as every host stop does, and the next stream
  * reuses it. */
 void v5_usb_unplug(void)

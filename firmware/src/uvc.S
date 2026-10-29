@@ -9,7 +9,7 @@
 @ controller reset (0xbdd40, 0xbdd50); the webcam init's 0xbdf3c clears only
 @ 0x100 and 0x8000. With 0x200 left set (`rSYS_CTRL_NEW =0x29c` instead of
 @ the boot's 0x9c) the host sees a full-speed device that answers nothing, so
-@ a webcam never came back after an unplug. This stub, in place of the
+@ the webcam does not come back after an unplug. This stub, in place of the
 @ `bl 0xbdf3c` at the start of usb_uvc_init, clears 0x8200 the drive init's
 @ way, then runs 0xbdf3c.
 @

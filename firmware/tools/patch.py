@@ -159,14 +159,14 @@ V6_DATA = [
 # class-specific VideoControl descriptor and put on the chain (output terminal's source = the
 # extension unit, whose source is the processing unit), and nothing else changed. Two words
 # point at stock's copy: register_desc(1) in usb_uvc_init (pool 0x3ef00, loaded at 0x3edc8) and
-# the L2 event that writes the alt-3 wMaxPacketSize 0x0400 at cfg+0xd4 (pool 0x52488,
-# 0x52364..0x52374); both move to v6_cfg, the second by how far that field moved.
+# the UVC bus event 10 (0x52328) that writes the alt-3 wMaxPacketSize 0x0400 at cfg+0xd4 (pool
+# 0x52488, 0x52364..0x52374); both move to v6_cfg, the second by how far that field moved.
 V6_CFG = 0xE39D0
 V6_FRAMES = [(1920, 1080), (1280, 720), (640, 360), (320, 180), (256, 144), (128, 72)]
 # the extension unit, as src/xu.h; the v6_cfg check below fails the build if they differ
 XU_ID, XU_SEL = 6, 1
 XU_GUID = uuid.UUID("21118ec3-89d6-4bb3-8015-7611dd2b1f87")
-V6_L2 = (0x52364 + B, "1c319fe50010a0e30420a0e3d410c3e5d520c3e5", 0xD4)  # ldr r3,=cfg; strb at +0xd4, +0xd5
+V6_ALT3_EP = (0x52364 + B, "1c319fe50010a0e30420a0e3d410c3e5d520c3e5", 0xD4)  # ldr r3,=cfg; strb at +0xd4, +0xd5
 
 
 def descs(b):
@@ -254,8 +254,8 @@ if not CANARY:
     assert c0 % 4 == 0 and GAP <= c0 and c0 + len(v6_want) <= g1, hex(c0)
     assert gap[c0 - GAP : c0 - GAP + len(v6_want)] == v6_want, "src/v6.S v6_cfg is not stock's config + V6_FRAMES + XU"
     assert sym["xu_box"] % 4 == 0, "xu_box: 0xbc9cc reads GET_CUR data with word loads"
-    assert d[V6_L2[0] : V6_L2[0] + 20].hex() == V6_L2[1] and ep_size_at(v6_old, 0x85) == V6_L2[2]
-    moved = ep_size_at(v6_want, 0x85) - V6_L2[2]
+    assert d[V6_ALT3_EP[0] : V6_ALT3_EP[0] + 20].hex() == V6_ALT3_EP[1] and ep_size_at(v6_old, 0x85) == V6_ALT3_EP[2]
+    moved = ep_size_at(v6_want, 0x85) - V6_ALT3_EP[2]
     WORD_HOOKS += [
         (0x3EF00, "d0390e00", "v6_cfg", False, 0, "register_desc(1) in usb_uvc_init: config 0xe39d0 -> v6_cfg"),
         (0x52488, "d0390e00", "v6_cfg", False, moved, f"alt-3 wMaxPacketSize write at cfg+0xd4: + {moved:#x}"),

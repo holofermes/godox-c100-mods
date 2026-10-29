@@ -6,8 +6,8 @@
 @ The restart (src/act.c act_reboot, docs/usb.md) is stock's 0x1fbac letting
 @ the SoC watchdog run out after it armed an RTC alarm to power the camera
 @ back up. While the webcam is up, uvc_task kicks the watchdog on every pass
-@ of its loop, at most 1 s apart, so the reset never came. This stub takes
-@ that kick and skips it once 0x1fbac has started.
+@ of its loop, at most 1 s apart, and the reset does not come. This stub
+@ takes that kick and skips it once 0x1fbac has started.
 @
 @ [0x12166e] is stock .bss, so 0 after every boot. 0x1fbac sets it to 1
 @ (0x1fbd8) after it switched the watchdog to period 7 and right before it

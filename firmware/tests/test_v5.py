@@ -72,7 +72,8 @@ from unicorn.arm_const import (
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CFG_DEFAULT = "display=on\nled=on\nsound=on\nlog=on\nusb_photo=drive\nusb_video=webcam\n"
+# the firmware defaults with log=on, so the checks can read LOG.TXT
+CFG_TEST = "display=on\nled=on\nsound=on\nlog=on\nusb_photo=drive\nusb_video=webcam\n"
 
 # struct offsets, v5.h
 CFG_DISPLAY, CFG_LED, CFG_SOUND, CFG_LOG, CFG_USB = 0, 1, 2, 3, 4
@@ -147,7 +148,7 @@ V5_ENTRIES = (
 )
 
 
-def boot(cfg_text=CFG_DEFAULT, cmd=None, files=None, mode=0):
+def boot(cfg_text=CFG_TEST, cmd=None, files=None, mode=0):
     f = dict(files or {})
     if cfg_text is not None:
         f["C100.TXT"] = cfg_text
@@ -599,7 +600,7 @@ def t_loader(h, armed=True):
 def t_settings(h):
     h.section = "settings load"
     print("\nsettings load")
-    m = boot(CFG_DEFAULT)
+    m = boot(CFG_TEST)
     h.ok("load_settings" in [t[0] for t in m.boot_trace], "SET hook reached load_settings")
     h.eq(cfgv(m, CFG_DISPLAY), 1, "display=on parsed")
     h.eq(cfgv(m, CFG_LED), 1, "led=on parsed")
@@ -902,7 +903,7 @@ def t_reboot_webcam(h):
         Ep0(m).set_cur(XU_SEL, XU_ID, line.encode().ljust(XU_LEN, b"\0"))
         tick(m, 100)
         h.eq(reboot_seq(m), want, f"xu `{line}` while streaming: the same")
-    m = boot(files={ONCE: "1\r\n"}, mode=0)
+    m = boot(files={WEBCAM: "1\r\n"}, mode=0)
     allow_reboot(m)
     m.poke8(m.sym["st"] + ST_ACTIVE, 2)
     tick(m, 0)
@@ -910,9 +911,9 @@ def t_reboot_webcam(h):
     tick(m, 60000 + 10)
     h.eq(reboot_seq(m), want, "`webcam 1` timer with the webcam up: the same")
 
-    print("  a drive session in Video after the host's eject, as on the camera (run 3)")
+    print("  a drive session in Video after the host's eject, as seen on a camera")
     for line in ("drive", "reboot", "webcam"):
-        m = boot(CFG_DEFAULT, mode=1)
+        m = boot(CFG_TEST, mode=1)
         allow_reboot(m)
         m.poke16(W_APP_STATE, 0x101)
         m.poke8(m.sym["st"] + ST_ACTIVE, 1)
@@ -1131,7 +1132,7 @@ def t_usb_plugin(h):
     h.section = "USB personality"
     print("\npersonality per switch position, through G1 0x1f5b0")
     for mode, want, name in ((0, 0x8001, "photo=drive"), (1, 0x8003, "video=webcam"), (2, 0x8003, "metering=webcam")):
-        m = boot(CFG_DEFAULT, mode=mode)
+        m = boot(CFG_TEST, mode=mode)
         m.gpio_input(95, 0)
         intact = plug(m)
         posts = [(t[1], t[2]) for t in m.calls("qsend")]
@@ -1144,7 +1145,7 @@ def t_usb_plugin(h):
 
     print("  webcam start clears the SET_CONFIG callback a drive init left behind")
     for mode, want in ((1, 0), (0, 0x3E5AC)):
-        m = boot(CFG_DEFAULT, mode=mode)
+        m = boot(CFG_TEST, mode=mode)
         m.gpio_input(95, 0)
         m.poke32(W_MSDC_CB, 0x3E5AC)  # as usb_msdc_init leaves it (0x3ea68 -> 0x4d65c)
         plug(m)
@@ -1152,7 +1153,7 @@ def t_usb_plugin(h):
 
     print("  unplug through G2 0x1f530")
     for mode, want, off in ((0, [], True), (1, [0x8005], False)):
-        m = boot(CFG_DEFAULT, mode=mode)
+        m = boot(CFG_TEST, mode=mode)
         plug(m)
         m.reset()
         m.call_arm(0x1F530, sp=STACK - 0x200, until=0x1F534)
@@ -1165,7 +1166,7 @@ def t_usb_plugin(h):
     h.called("usb_off", "unplug with nothing posted falls back to 0xbdf04", m=m)
 
     print("  charger unplug in the drive personality: the camera keeps the card")
-    m = boot(CFG_DEFAULT, mode=0)
+    m = boot(CFG_TEST, mode=0)
     m.gpio_input(95, 0)
     plug(m)
     m.task("periph")
@@ -1189,7 +1190,7 @@ def t_unplug_stream(h):
     h.section = "webcam unplug while streaming"
     print("\nwebcam unplug through G2: a running stream is stopped the host's way before the uninit")
     for alt, want in ((3, ["msgq_send 2", "delay 500", "qsend 0x8005"]), (0, ["qsend 0x8005"])):
-        m = boot(CFG_DEFAULT, mode=1)
+        m = boot(CFG_TEST, mode=1)
         m.gpio_input(95, 0)
         plug(m)
         m.poke32(UVCQ, 0xA06000)
@@ -1215,7 +1216,7 @@ def t_unplug_stream(h):
     h.has("[v5] usb off webcam", m=m)
 
     print("  a drive unplug is unchanged")
-    m = boot(CFG_DEFAULT, mode=0)
+    m = boot(CFG_TEST, mode=0)
     m.gpio_input(95, 0)
     plug(m)
     m.poke32(VS_ALT, 3)
@@ -1287,7 +1288,7 @@ def t_uvc_reinit(h):
 def t_usb_busy_defers(h):
     h.section = "USB deferral"
     print("\nplug-in while capturing defers to the tick (G3b 0x2247C)")
-    m = boot(CFG_DEFAULT, mode=1)
+    m = boot(CFG_TEST, mode=1)
     m.gpio_input(95, 1)
     plug(m)
     h.not_called("qsend", "nothing posted while the busy pin is high", m=m)
@@ -1320,7 +1321,7 @@ def t_usb_busy_defers(h):
 def t_eject_cb(h):
     h.section = "eject callback"
     print("\neject callback notes the handback")
-    m = boot(CFG_DEFAULT)
+    m = boot(CFG_TEST)
     m.task("usb")
     seen = []
     m.uc.hook_add(
@@ -1343,7 +1344,7 @@ def t_eject_cb(h):
 def t_hook_eject(h):
     h.section = "seam eject e2e"
     print("\nseam: eject handback end to end, stock 0x4e8dc -> eject_stub -> v5_eject_cb -> tick -> LUN 1")
-    m = boot(CFG_DEFAULT, mode=0)
+    m = boot(CFG_TEST, mode=0)
     m.gpio_input(95, 0)
     plug(m)
     h.eq(stv(m, ST_ACTIVE), 1, "drive personality active")
@@ -1409,7 +1410,7 @@ def t_hook_eject(h):
     h.clean(m, "no file call while the SD driver was down")
 
     print("  remount fails after the eject")
-    m = boot(CFG_DEFAULT, mode=0)
+    m = boot(CFG_TEST, mode=0)
     m.gpio_input(95, 0)
     plug(m)
     m.task("usb")
@@ -1438,7 +1439,7 @@ def t_hook_eject(h):
     h.eq([(a, s, v) for a, s, v, _ in lun], [(H_LUN0, 2, 1)], "then hands the LUN back")
 
     print("  retries stop after 6, stock's next mount clears the stale card")
-    m = boot(CFG_DEFAULT)
+    m = boot(CFG_TEST)
     m.poke8(m.sym["st"] + ST_STALE, 1)
     m.mount_ret = -1
     m.reset()
@@ -1473,7 +1474,7 @@ def t_remount(h):
         tick(m, ms)
         return [x for x in m.names() if x in REMOUNT_CALLS]
 
-    m = boot(CFG_DEFAULT)
+    m = boot(CFG_TEST)
     ejected(m)
     m.sd_init_ret = -1
     h.eq(
@@ -1486,7 +1487,7 @@ def t_remount(h):
     h.eq((stv(m, ST_STALE), m.u8(B_CARD_OK)), (0, 1), "card back: not stale, card flag 1")
     h.clean(m)
 
-    m = boot(CFG_DEFAULT)
+    m = boot(CFG_TEST)
     ejected(m)
     m.mount_ret = -1
     h.eq(
@@ -1857,11 +1858,11 @@ def t_v6_desc(h):
         )
     gw = m.watch_writes(GAP, GAP_END)
     sw = m.watch_writes(V6_CFG_STOCK, V6_CFG_STOCK + n0)
-    m.call_arm(0x52364, until=0x52378)  # L2 event 10
+    m.call_arm(0x52364, until=0x52378)  # UVC bus event 10 (0x52328)
     h.eq(
         [(a - c0, s, v) for a, s, v, _ in gw],
         [(ep[-1] + 4, 1, 0), (ep[-1] + 5, 1, 4)],
-        "L2 event 10 writes 0x0400 to v6_cfg's alt-3 wMaxPacketSize, nothing else in the gap",
+        "bus event 10 writes 0x0400 to v6_cfg's alt-3 wMaxPacketSize, nothing else in the gap",
     )
     h.eq(sw, [], "and nothing at 0xe39d0")
     h.clean(m)
@@ -1940,7 +1941,7 @@ def t_v6_size(h):
 
 
 # ---------------------------------------------------------------- CMD.TXT webcam
-ONCE = "WEBCAM.ONE"
+WEBCAM = "WEBCAM.ONE"
 
 
 def settle(m):
@@ -1969,10 +1970,10 @@ def t_webcam_cmd(h):
         allow_reboot(m)
         tick(m, 5000)
         what = f"`webcam{arg.rstrip()}`"
-        h.eq(m.card.get(ONCE), want, f"{what}: WEBCAM.ONE holds {want!r}")
+        h.eq(m.card.get(WEBCAM), want, f"{what}: WEBCAM.ONE holds {want!r}")
         h.eq(len(m.calls("reboot")), 1, f"{what}: one restart, 0x1fbac")
         tr, n = m.trace, m.names()
-        mk = [i for i, name, fl in opened(m) if name == "G:\\" + ONCE and fl == 0x601]
+        mk = [i for i, name, fl in opened(m) if name == "G:\\" + WEBCAM and fl == 0x601]
         iu = n.index("unmount") if "unmount" in n else -1
         ia = n.index("reboot") if "reboot" in n else -1
         ok = (
@@ -1981,7 +1982,7 @@ def t_webcam_cmd(h):
             and "flush" in n[mk[0] : iu]
             and n.index("flush", mk[0]) < iu < ia
         )
-        h.ok(ok, f"{what}: marker created, written, closed and flushed before the unmount and the post", f"({n})")
+        h.ok(ok, f"{what}: marker created, written, closed and flushed before the unmount and 0x1fbac", f"({n})")
         h.ok(
             not any(t[0] in ("open", "write", "unlink") for t in tr[iu:]),
             f"{what}: no file call after the unmount: the marker stays for the next boot",
@@ -1991,15 +1992,15 @@ def t_webcam_cmd(h):
             h.has("[v5] webcam 5\r\n[v5] reboot\r\n", m=m)
         h.clean(m)
 
-    print("  bad arguments: nothing written, nothing posted")
+    print("  bad arguments: nothing written, no 0x1fbac")
     for arg in ("abc", "-1", "1441", "99999999999", "5x", "+5", "5 6", "0x5"):
         m = boot(cmd=f"webcam {arg}\n")
         allow_reboot(m)
         tick(m, 5000)
         tick(m, 2100)
         h.ok(
-            ONCE not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
-            f"`webcam {arg}`: no marker, no unmount, no post",
+            WEBCAM not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
+            f"`webcam {arg}`: no marker, no unmount, no 0x1fbac",
             f"({m.card.names()}, {m.names()})",
         )
         h.has("cmd: bad webcam", f"`webcam {arg}`: LOG.TXT `cmd: bad webcam`", m=m)
@@ -2017,19 +2018,19 @@ def t_webcam_cmd(h):
         tick(m, 5000)
         tick(m, 2100)
         h.ok(
-            ONCE not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
-            f"{name}: no marker, no unmount, no post",
+            WEBCAM not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
+            f"{name}: no marker, no unmount, no 0x1fbac",
             f"({m.card.names()}, {m.names()})",
         )
         h.has("[v5] reboot 3", f"{name}: LOG.TXT `reboot 3`", m=m)
 
-    print("  the unmount fails: no post, the marker is deleted again")
+    print("  the unmount fails: no 0x1fbac, the marker is deleted again")
     m = boot(cmd="webcam 5\n")
     allow_reboot(m)
     m.unmount_ret = -1
     tick(m, 5000)
     tick(m, 2100)
-    h.eq((m.calls("reboot"), ONCE in m.card.names()), ([], False), "no restart, no WEBCAM.ONE left")
+    h.eq((m.calls("reboot"), WEBCAM in m.card.names()), ([], False), "no restart, no WEBCAM.ONE left")
     h.has("[v5] reboot ffffffff\r\n[v5] webcam: marker removed", m=m)
     h.eq(leaks(m), {}, "no heap left behind")
     h.clean(m)
@@ -2039,11 +2040,11 @@ def t_webcam_boot(h):
     h.section = "webcam boot"
     print("\nboot with WEBCAM.ONE: deleted first, then the webcam on every switch position")
     for mode in (0, 1, 2):
-        m = boot(files={ONCE: "5\r\n"}, mode=mode)
+        m = boot(files={WEBCAM: "5\r\n"}, mode=mode)
         m.gpio_input(95, 0)
         plug(m)
         h.eq([t[2] for t in m.calls("qsend")], [0x8003], f"switch {mode}: plug-in posts the webcam init 0x8003")
-        h.ok(ONCE not in m.card.names(), f"switch {mode}: WEBCAM.ONE deleted")
+        h.ok(WEBCAM not in m.card.names(), f"switch {mode}: WEBCAM.ONE deleted")
         tick(m, 2100)
         h.has("[v5] webcam: boot 5\r\n", f"switch {mode}: LOG.TXT `webcam: boot 5`", m=m)
         h.has(f"[v5] usb {mode} webcam", m=m)
@@ -2054,7 +2055,7 @@ def t_webcam_boot(h):
     h.eq([t[2] for t in m.calls("qsend")], [0x8001], "no marker, Photo: the drive, as before")
 
     print("  the delete and its flush come before anything is acted on")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, ONCE: "5\r\n"}))
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST, WEBCAM: "5\r\n"}))
     acts = []
     for name in ("webcam_forced", "reboot_at"):
         a = m.sym[name]
@@ -2066,25 +2067,25 @@ def t_webcam_boot(h):
         m.uc.hook_add(UC_HOOK_MEM_WRITE, wr, begin=a, end=a + (3 if name == "reboot_at" else 0))
     mount(m)
     n = m.names()
-    iu = [i for i, t in enumerate(m.trace) if t[0] == "unlink" and m.cstr(t[1]) == "G:\\" + ONCE]
+    iu = [i for i, t in enumerate(m.trace) if t[0] == "unlink" and m.cstr(t[1]) == "G:\\" + WEBCAM]
     ok = len(iu) == 1 and "flush" in n[iu[0] :] and acts and all(i > n.index("flush", iu[0]) for i, _ in acts)
     h.ok(ok, "unlink, flush, then webcam_forced and the timer are set", f"(unlink {iu}, acts {acts}, {n})")
     h.eq(sorted({x for _, x in acts}), ["reboot_at", "webcam_forced"], "both set")
 
     print("  webcam 5: the reboot 5 minutes after the boot, not before")
-    m = boot(files={ONCE: "5\r\n"})
+    m = boot(files={WEBCAM: "5\r\n"})
     allow_reboot(m)
     t0 = m.ticks  # load_settings ran at this tick
     tick(m, 0)
     m.ticks = t0 + 5 * 60000 - 2
     tick(m)
-    h.eq(m.calls("reboot"), [], "4:59.998 after the boot: nothing posted")
+    h.eq(m.calls("reboot"), [], "4:59.998 after the boot: no 0x1fbac")
     m.ticks = t0 + 5 * 60000 + 1
     m.reset()
     tick(m)
     h.eq(len(m.calls("reboot")), 1, "5:00 after the boot: 0x1fbac")
     h.called("unmount", "through act_reboot: the card unmounted first", m=m)
-    h.ok(ONCE not in m.card.names(), "no WEBCAM.ONE on the card: the next boot follows the switch")
+    h.ok(WEBCAM not in m.card.names(), "no WEBCAM.ONE on the card: the next boot follows the switch")
     settle(m)
     h.has("[v5] webcam: time up\r\n[v5] reboot\r\n", m=m)
     m2 = Machine(IMAGE, SYM, m.card)
@@ -2099,7 +2100,7 @@ def t_webcam_boot(h):
     h.eq(m2.calls("reboot"), [], "and no timer")
 
     print("  a refused reboot is tried again a minute later")
-    m = boot(files={ONCE: "1\r\n"})
+    m = boot(files={WEBCAM: "1\r\n"})
     allow_reboot(m)
     m.poke8(B_CAPTURE_BUSY, 1)
     tick(m, 60000 + 10)
@@ -2108,12 +2109,12 @@ def t_webcam_boot(h):
     h.eq(len(m.calls("reboot")), 0, "nothing in the next 59 s")
     m.poke8(B_CAPTURE_BUSY, 0)
     tick(m, 1002)
-    h.eq(len(m.calls("reboot")), 1, "60 s later, not busy: posted")
+    h.eq(len(m.calls("reboot")), 1, "60 s later, not busy: 0x1fbac")
     settle(m)
     h.has("[v5] webcam: time up\r\n[v5] reboot 3\r\n", m=m)
 
     print("  webcam (no minutes): the webcam until switched off, no timer")
-    m = boot(files={ONCE: "0\r\n"}, mode=0)
+    m = boot(files={WEBCAM: "0\r\n"}, mode=0)
     allow_reboot(m)
     m.gpio_input(95, 0)
     plug(m)
@@ -2123,7 +2124,7 @@ def t_webcam_boot(h):
     h.has("[v5] webcam: boot 0\r\n", m=m)
 
     print("  the marker cannot be deleted: a normal boot, the marker stays")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, ONCE: "5\r\n"}))
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST, WEBCAM: "5\r\n"}))
     m.unlink_ret = -1
     mount(m)
     m.poke8(B_USB_POLL_EN, 1)
@@ -2134,7 +2135,7 @@ def t_webcam_boot(h):
     h.ok("webcam: boot" not in log(m), "no `webcam: boot`")
     plug(m)
     h.eq([t[2] for t in m.calls("qsend")], [0x8001], "Photo: the drive")
-    h.eq(m.card.get(ONCE), b"5\r\n", "WEBCAM.ONE still there")
+    h.eq(m.card.get(WEBCAM), b"5\r\n", "WEBCAM.ONE still there")
     tick(m, 10 * 60000)
     h.eq(m.calls("reboot"), [], "no timer")
 
@@ -2147,7 +2148,7 @@ def t_webcam_boot(h):
         ("", "webcam: bad \r\n"),
         ("1" * 20, "webcam: bad file"),
     ):
-        m = boot(files={ONCE: text}, mode=0)
+        m = boot(files={WEBCAM: text}, mode=0)
         allow_reboot(m)
         m.gpio_input(95, 0)
         tick(m, 2100)
@@ -2155,21 +2156,21 @@ def t_webcam_boot(h):
         plug(m)
         tick(m, 10 * 60000)
         h.ok(
-            ONCE not in m.card.names() and [t[2] for t in m.calls("qsend")] == [0x8001] and not m.calls("reboot"),
+            WEBCAM not in m.card.names() and [t[2] for t in m.calls("qsend")] == [0x8001] and not m.calls("reboot"),
             f"{text[:8]!r}: deleted, Photo is the drive, no timer",
             f"({m.card.names()}, {m.calls('qsend')}, {m.calls('apq')})",
         )
         h.eq(leaks(m), {}, f"{text[:8]!r}: no heap left behind")
 
     print("  once per boot, after the update check")
-    m = boot(files={ONCE: "0\r\n"})
-    m.card.f[ONCE] = bytearray(b"5\r\n")  # put back over USB, then the card re-inserted
+    m = boot(files={WEBCAM: "0\r\n"})
+    m.card.f[WEBCAM] = bytearray(b"5\r\n")  # put back over USB, then the card re-inserted
     mount(m)
-    h.eq(m.card.get(ONCE), b"5\r\n", "a second mount in the same boot leaves a new marker for the next boot")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, ONCE: "5\r\n"}))
+    h.eq(m.card.get(WEBCAM), b"5\r\n", "a second mount in the same boot leaves a new marker for the next boot")
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST, WEBCAM: "5\r\n"}))
     m.poke8(B_UPD_CHECKED, 2)  # the updater started on this boot
     mount(m)
-    h.eq((m.card.get(ONCE), m.hits["load_settings"]), (b"5\r\n", 0), "a mount during an update: marker untouched")
+    h.eq((m.card.get(WEBCAM), m.hits["load_settings"]), (b"5\r\n", 0), "a mount during an update: marker untouched")
     h.clean(m)
 
 
@@ -2195,7 +2196,7 @@ def t_drive_cmd(h):
         and "flush" in n[mk[0] : iu]
         and n.index("flush", mk[0]) < iu < ia
     )
-    h.ok(ok, "marker created, written, closed and flushed before the unmount and the post", f"({n})")
+    h.ok(ok, "marker created, written, closed and flushed before the unmount and 0x1fbac", f"({n})")
     h.ok(
         not any(t[0] in ("open", "write", "unlink") for t in m.trace[iu:]),
         "no file call after the unmount: the marker stays for the next boot",
@@ -2211,7 +2212,7 @@ def t_drive_cmd(h):
         tick(m, 2100)
         h.ok(
             DRIVE not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
-            f"`{line}`: no marker, no unmount, no post",
+            f"`{line}`: no marker, no unmount, no 0x1fbac",
         )
         h.has("cmd: bad drive", f"`{line}`: LOG.TXT `cmd: bad drive`", m=m)
 
@@ -2229,12 +2230,12 @@ def t_drive_cmd(h):
         tick(m, 2100)
         h.ok(
             DRIVE not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
-            f"{name}: no marker, no unmount, no post",
+            f"{name}: no marker, no unmount, no 0x1fbac",
             f"({m.card.names()}, {m.names()})",
         )
         h.has("[v5] reboot 3", f"{name}: LOG.TXT `reboot 3`", m=m)
 
-    print("  the unmount fails: no post, the marker is deleted again")
+    print("  the unmount fails: no 0x1fbac, the marker is deleted again")
     m = boot(cmd="drive\n")
     allow_reboot(m)
     m.unmount_ret = -1
@@ -2262,7 +2263,7 @@ def t_drive_boot(h):
         h.eq(leaks(m), {}, f"switch {mode}: no heap left behind")
 
     print("  the delete and its flush come before anything is acted on")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, DRIVE: "drive\r\n"}))
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST, DRIVE: "drive\r\n"}))
     acts = []
     a = m.sym["drive_forced"]
 
@@ -2293,7 +2294,7 @@ def t_drive_boot(h):
         f"({m.card.names()}, {m.calls('qsend')})",
     )
     h.eq(leaks(m), {}, "20 B: no heap left behind")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, DRIVE: "drive\r\n"}))
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST, DRIVE: "drive\r\n"}))
     m.unlink_ret = -1
     mount(m)
     m.poke8(B_USB_POLL_EN, 1)
@@ -2307,27 +2308,27 @@ def t_drive_boot(h):
     h.eq(m.card.get(DRIVE), b"drive\r\n", "DRIVE.ONE still there")
 
     print("  both markers: both deleted, the drive wins, no timer")
-    m = boot(files={DRIVE: "drive\r\n", ONCE: "5\r\n"}, mode=1)
+    m = boot(files={DRIVE: "drive\r\n", WEBCAM: "5\r\n"}, mode=1)
     m.gpio_input(95, 0)
     tick(m, 2100)
     plug(m)
-    h.ok(DRIVE not in m.card.names() and ONCE not in m.card.names(), "DRIVE.ONE and WEBCAM.ONE deleted")
+    h.ok(DRIVE not in m.card.names() and WEBCAM not in m.card.names(), "DRIVE.ONE and WEBCAM.ONE deleted")
     h.eq([t[2] for t in m.calls("qsend")], [0x8001], "Video: the drive")
     h.has("[v5] drive: boot\r\n[v5] webcam: ignored, drive boot\r\n", m=m)
     tick(m, 10 * 60000)
     h.eq(m.calls("reboot"), [], "10 min later: no restart")
     h.eq(leaks(m), {}, "no heap left behind")
-    m = boot(files={DRIVE: "drive\r\n", ONCE: "abc"}, mode=1)
+    m = boot(files={DRIVE: "drive\r\n", WEBCAM: "abc"}, mode=1)
     tick(m, 2100)
     h.has("[v5] drive: boot\r\n[v5] webcam: bad abc\r\n", m=m)
-    h.ok(DRIVE not in m.card.names() and ONCE not in m.card.names(), "bad WEBCAM.ONE: both deleted")
+    h.ok(DRIVE not in m.card.names() and WEBCAM not in m.card.names(), "bad WEBCAM.ONE: both deleted")
 
     print("  once per boot, after the update check")
     m = boot(files={DRIVE: "drive\r\n"})
     m.card.f[DRIVE] = bytearray(b"drive\r\n")
     mount(m)
     h.eq(m.card.get(DRIVE), b"drive\r\n", "a second mount in the same boot leaves a new marker for the next boot")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT, DRIVE: "drive\r\n"}))
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST, DRIVE: "drive\r\n"}))
     m.poke8(B_UPD_CHECKED, 2)
     mount(m)
     h.eq((m.card.get(DRIVE), m.hits["load_settings"]), (b"drive\r\n", 0), "a mount during an update: marker untouched")
@@ -2478,7 +2479,7 @@ def t_xu_ep0(h):
     h.clean(m)
 
     print("  features off: answered, SET_CUR refused with code 2, nothing runs")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT}))  # before any mount: no overlay
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST}))  # before any mount: no overlay
     e = Ep0(m)
     m.trap_overlay()
     h.eq(e.get(GET_INFO, XU_SEL, XU_ID, 1)["data"], b"\x03", "no overlay: GET_INFO answered")
@@ -2489,7 +2490,7 @@ def t_xu_ep0(h):
     h.eq(xu_box(m), (bytes(XU_LEN), 0), "no overlay: mailbox untouched")
     m.call_arm(0x22360, sp=STACK - 0x100, until=0x22364)
     h.eq(m.ovl_blocks, [], "no overlay code ran, the tick only refreshes the display")
-    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_DEFAULT}))
+    m = Machine(IMAGE, SYM, Card({"C100.TXT": CFG_TEST}))
     m.nor[OVL_FLASH + OVL_HDR + 0x40] ^= 0xFF  # body CRC fails: the load fails
     mount(m)
     e = Ep0(m)
@@ -2568,7 +2569,7 @@ def t_xu_run(h):
     h.section = "extension unit: commands"
     print("\na line from the extension unit runs through the CMD.TXT parser on the next tick")
 
-    def sent(line, cfg_text=CFG_DEFAULT, **kw):
+    def sent(line, cfg_text=CFG_TEST, **kw):
         m = boot(cfg_text, **kw)
         allow_reboot(m)
         tick(m, 100)  # C100.TXT applied
@@ -2595,7 +2596,7 @@ def t_xu_run(h):
     h.eq(len(m.calls("reboot")), 1, "reboot: 0x1fbac")
     h.has("[v5] xu: reboot\r\n[v5] reboot\r\n", m=m)
     m = sent("webcam 5")
-    h.eq((m.card.get(ONCE), len(m.calls("reboot"))), (b"5\r\n", 1), "webcam 5: WEBCAM.ONE, 0x1fbac")
+    h.eq((m.card.get(WEBCAM), len(m.calls("reboot"))), (b"5\r\n", 1), "webcam 5: WEBCAM.ONE, 0x1fbac")
     m = sent("drive")
     h.eq((m.card.get(DRIVE), len(m.calls("reboot"))), (b"drive\r\n", 1), "drive: DRIVE.ONE, 0x1fbac")
     h.has("[v5] xu: drive\r\n[v5] drive\r\n[v5] reboot\r\n", m=m)
@@ -2648,7 +2649,7 @@ def t_xu_run(h):
     tick(m, 2100)
     h.ok(
         xu_box(m)[1] == 0 and DRIVE not in m.card.names() and not m.calls("reboot") and "unmount" not in m.names(),
-        "update on the card: taken, not run (no marker, no unmount, no post)",
+        "update on the card: taken, not run (no marker, no unmount, no 0x1fbac)",
     )
     h.has("[v5] xu: drive not run, update on the card", m=m)
     h.clean(m)

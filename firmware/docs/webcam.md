@@ -25,8 +25,8 @@ APMode 0x106's target becomes 1920x1080, the whole sensor (V6_DATA in `tools/pat
 
 Frame 1 of the descriptor is 1920x1080 (below). On the camera: MJPEG 1920x1080 at 26.7 fps over
 7 minutes, no gap between frames over 52 ms; the log shows `arg->Target=(1920 1080)`,
-`[V]x:0,y:0 ... crop:0,scaler:0` [seen]. That build changed frame 1 in stock's descriptor in
-place; the frame-1 bytes are the same in the copy below.
+`[V]x:0,y:0 ... crop:0,scaler:0` [seen]. The frame rate was measured with frame 1 changed in
+place in stock's descriptor; the copy below has the same frame-1 bytes.
 
 ## Frame sizes
 
@@ -69,7 +69,7 @@ is 1920x1080 for every size, and the unit-1 output, the rear size and the JPEG h
 frame. That the UVC JPEG comes from unit 1 is [inferred]: unit 0 is not programmed under 0x106,
 and unit 1's interrupt feeds the strip handler [read].
 
-Open until the camera test: the scaler beyond 6x (256x144 is 7.5x, 128x72 is 15x, stock uses
+Not yet tested on the camera: the scaler beyond 6x (256x144 is 7.5x, 128x72 is 15x, stock uses
 about 6x), the JPEG engine at widths of 256 and below with 2 or 3 strips a frame, the frame rate
 at small sizes, the free heap across size switches, Metering at small sizes, and hosts other than
 Linux.
@@ -98,7 +98,7 @@ only: a recording started before the PC opens the stream can still be stopped du
 ## Extension unit
 
 A PC sends `CMD.TXT` lines to the camera through a UVC extension unit (`tools/c100cmd.py`,
-README). Not yet tested on the camera.
+README).
 
 | | |
 | --- | --- |

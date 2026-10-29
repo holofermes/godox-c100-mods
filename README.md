@@ -10,24 +10,22 @@ Mods for the Godox C100 card camera:
 
 ## Firmware
 
-Patches for the firmware of the Godox C100 card camera.
-
 The patches are added on top of Godox's stock firmware, which is then installed the official way.
 
 This works because:
 
 - the stock firmware is not encrypted, so it can be read and reasoned about trivially
-- it has empty space for our compiled code: some space in RAM for what runs at boot, and some
+- it has empty space for the patch's code: some space in RAM for what runs at boot, and some
   space of flash for the features
 - the updater only checks the file's size and its first four bytes, then flashes it: no
   signature, no checksum
 
-Here are some other projects that also patch the firmware:
+Here are some other projects that also patch the firmware; this one builds on the first two:
 
 - [mullwar/godox_c100_custom_firmware](https://github.com/mullwar/godox_c100_custom_firmware):
-  image format, resource packing, sound mods.
-- [mombotro/Godox-C100-GHDK](https://github.com/mombotro/Godox-C100-GHDK): firmware map and
-  tools.
+  image format, resource packing, the first sound mods.
+- [mombotro/Godox-C100-GHDK](https://github.com/mombotro/Godox-C100-GHDK): firmware map, file
+  API and NOR read addresses, the sensor ID.
 - [kelleyvanevert/godox_c100](https://github.com/kelleyvanevert/godox_c100): retro dithered
   photos, built in the browser.
 
@@ -39,19 +37,20 @@ Tested on a C100 with a V1.1.6 build:
 
 - USB webcam, MJPEG 1920x1080 from the full sensor, ~27 fps.
 - USB mode per switch position: Photo = USB drive, Video and Metering = webcam.
+- Unplugging and replugging the webcam, also mid-stream.
 - Display, LED and sounds off from a settings file on the card.
 - Long press on the middle button toggles the display and LED.
 - `LOG.TXT` on the card with the firmware's own debug output, when switched on.
 - `CMD.TXT` on the card, run when the camera finds it.
+- `webcam [MIN]` in `CMD.TXT`: one boot as the webcam whatever the switch.
+- `drive` in `CMD.TXT`: one boot as the USB drive whatever the switch.
+- Commands from the PC while the camera is the webcam, also while it streams
+  (`firmware/tools/c100cmd.py`).
 - No auto power-off while on USB power.
 
 Built, not yet tested on the camera:
 
 - Webcam frame sizes 1280x720, 640x360, 320x180, 256x144 and 128x72, all from the full sensor.
-- `webcam [MIN]` in `CMD.TXT`: one boot as the webcam whatever the switch.
-- `drive` in `CMD.TXT`: one boot as the USB drive whatever the switch.
-- Commands from the PC while the camera is the webcam, also while it streams
-  (`firmware/tools/c100cmd.py`).
 
 Limits:
 
@@ -129,13 +128,12 @@ Commands, one per line, in the card root. Checked about every 3 s while the came
     display on|off      also: led, sound
     set KEY=VALUE       a C100.TXT line, applied now
     reboot              flush the log and restart, unless recording or capturing; with a cable
-                        in, USB comes back by itself. With the webcam up, not yet tested on the
-                        camera
+                        in, USB comes back by itself
     webcam [MIN]        restart as the webcam, whatever the switch, for that boot only; with
                         MIN (1 to 1440), restart again MIN minutes later and follow the switch
-                        (firmware/docs/usb.md). Not yet tested on the camera
+                        (firmware/docs/usb.md)
     drive               restart as the USB drive, whatever the switch, for that boot only
-                        (firmware/docs/usb.md). Not yet tested on the camera
+                        (firmware/docs/usb.md)
 
 ### Commands from the PC
 
@@ -149,7 +147,7 @@ The camera runs the line as if it came from `CMD.TXT` and logs it as `xu: <line>
 the webcam into the USB drive without touching the switch. The tool finds the camera by its USB
 ID (`--device /dev/videoN` to pick one) and needs only Python 3.11. Lines up to 32 characters.
 The camera takes a line only while it has a card and the patch loaded. The line goes through a
-UVC extension unit (firmware/docs/webcam.md). Not yet tested on the camera.
+UVC extension unit (firmware/docs/webcam.md).
 
 ### LOG.TXT
 
@@ -172,7 +170,7 @@ The camera enumerates only when the cable goes into a camera that is already on.
   Frame sizes, all 16:9 from the full sensor: 1920x1080 (the default), 1280x720, 640x360,
   320x180, 256x144, 128x72. Pick one with `--resolution=256x144` in ustreamer, or
   `v4l2-ctl --set-fmt-video=width=256,height=144,pixelformat=MJPG`. Only 1920x1080 is tested on
-  the camera so far.
+  the camera.
 
 ### Docs
 
@@ -191,13 +189,6 @@ A two-part printed case: the camera sits in a cup on top, a USB-C plug in its fl
 Raspberry Pi Zero W, a 1200 mAh cell with its charger, and on the back a 128x64 1-bit OLED. The
 Pi runs [ghee](https://github.com/holofermes/ghee) to draw on the OLED. Parts, printing and
 wiring: [case/README.md](case/README.md). In 3D: https://holofermes.github.io/godox-c100-mods/
-
-## Credits
-
-- [mullwar/godox_c100_custom_firmware](https://github.com/mullwar/godox_c100_custom_firmware):
-  image format, resource packing, the first sound mods.
-- [mombotro/Godox-C100-GHDK](https://github.com/mombotro/Godox-C100-GHDK): firmware map, file
-  API and NOR read addresses, the sensor ID.
 
 ## License
 
