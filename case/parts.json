@@ -1,0 +1,1859 @@
+{
+  "argon_oled_v5": {
+    "name": "Argon ONE V5 Industria OLED Display Module (128x64, I2C 0x3C, in housing)",
+    "src": "https://www.waveshare.com/argon-one-v5-oled-module.htm",
+    "estimate": true,
+    "size": [
+      43.0,
+      32.5,
+      8.75
+    ],
+    "price_usd": 10.0,
+    "notes": "From Waveshare's outline drawing: 43.0 x 32.5 housing, display face 1.8 proud, screw holes at the ends of the 43 axis. Depth 8.75 unpressed measured (the drawing says 9.0). Cable to GPIO pins 1-8. Argon price $10.00 (argon40.com), Amazon $9.99, Waveshare $9.49.",
+    "features": {
+      "cable": {
+        "w": 5.5,
+        "t": 1.2,
+        "bend_r": 1.5,
+        "run": 8.0,
+        "notes": "five loose wires side by side, bent 90 degrees right past the plug; run: the straight part after the bend; estimate"
+      },
+      "conn": {
+        "edge": "+z",
+        "w": 10.4,
+        "y0": 0.05,
+        "y1": 4.05,
+        "depth": 6.0,
+        "notes": "white 5-pin socket in the middle of a long edge, its face flush with the edge; pin pitch about 1.5 (JST ZH style) and 10.4 along the edge from a photo, in the front frame's thickness. Edge from the drawing (amber marks at the top edge, mid width). Estimate."
+      },
+      "display": {
+        "w": 28.51,
+        "h": 17.3,
+        "proud": 1.8,
+        "v": 0.0,
+        "notes": "visible screen measured; 1.8 proud from the drawing; centred as in the drawing (0.5 off at most). Read in the upper part: unconfirmed, the case does not depend on it."
+      },
+      "frame": {
+        "t": 4.1,
+        "notes": "front frame carrying the display; it is the push button: it moves toward the plate and clicks two switches against it. 8.75 - 2.85 - 1.8. Same outline as the plate."
+      },
+      "holes": {
+        "d": 3.0,
+        "points_xz": [
+          [
+            -18.15,
+            0.0
+          ],
+          [
+            18.15,
+            0.0
+          ]
+        ],
+        "screw": "M2.5",
+        "notes": "through the back plate at the ends of the 43 axis, centred on the 32.5 axis; d 3.0 and centres +-18.15 from the drawing (estimate): an M2.5 clearance hole. The front frame is open over them."
+      },
+      "plate": {
+        "t": 2.85,
+        "r": 2.0,
+        "notes": "back plate with the two screw holes, measured 2.85; corner r 2.0 from the drawing (estimate)"
+      },
+      "plug": {
+        "w": 9.0,
+        "t": 3.4,
+        "out": 4.5,
+        "notes": "mated 5-pin plug, body out of the socket face; estimate from a photo"
+      }
+    },
+    "mass_g": 32,
+    "mass_estimate": false,
+    "mass_src": "https://www.waveshare.com/argon-one-v5-oled-module.htm (Weight: 0.032 kg, may include packaging)"
+  },
+  "camera": {
+    "name": "Godox C100",
+    "frame": "X at body centre, +X to the right as seen from the back (the mode switch side). Y = 0 on the back face plane, +Y toward the front (lens). Z = 0 on the bottom edge (microSD, USB-C, reset). Faces: back, front: u = X, v = Z. left (-X), right (+X): u = Y, v = Z. bottom, top: u = X, v = Y. All features in mm in those face-local coordinates; d = diameter, w along u, h along v.",
+    "src": [
+      "traced from Godox product renders (back, front, both sides, bottom)",
+      "https://godox.us/godox/godox-c100-transparent-viewfinder-camera (104.1 x 71.7 x 19.1 mm, 65 g)",
+      "https://www.newsshooter.com/2026/08/10/godox-c100-transparent-viewfinder-camera-review (104.1 x 71.7 x 19.1, LED bottom right)",
+      "https://www.godox.com/product-e/C100.html (screen 60.8 x 47.8 mm, 5 V 1 A in)",
+      "Godox C100 manual V1.0, Godox_C100_CN_EN.pdf page 10 (names of parts)"
+    ],
+    "estimate": true,
+    "size": [
+      71.7,
+      19.1,
+      104.1
+    ],
+    "size_notes": "Spec size. X excludes the switch knob (+1.2 at +X). Y is back face to the patterned panel front; the arrow pill stands 0.35 proud of the back (Y < 0). Every view was scaled per axis to the spec: the renders are 1.5 % narrower (X) and 1.5 % deeper (Y) than the spec for the same height. With one scale from the height the body would be 70.6 wide and 19.4 deep.",
+    "features": {
+      "window_back": {
+        "face": "back",
+        "u": -0.1,
+        "v": 67.6,
+        "w": 60.2,
+        "h": 45.3,
+        "r": 4.9,
+        "u0": -30.2,
+        "u1": 30.0,
+        "v0": 44.9,
+        "v1": 90.2,
+        "notes": "See-through window opening on the back (grey screen). Must stay clear. Godox screen spec 60.8 x 47.8: the screen runs a little under the bezel."
+      },
+      "window_front": {
+        "face": "front",
+        "u": 0.1,
+        "v": 67.1,
+        "w": 60.7,
+        "h": 44.8,
+        "r": 4.9,
+        "u0": -30.3,
+        "u1": 30.4,
+        "v0": 44.8,
+        "v1": 89.5,
+        "notes": "Same opening seen from the front; it goes through the thin part. Must stay clear on both sides, with a clear line of sight through it."
+      },
+      "pill": {
+        "face": "back",
+        "u": 0.0,
+        "v": 38.1,
+        "w": 42.4,
+        "h": 8.0,
+        "r": 4.0,
+        "proud": 0.37,
+        "buttons": [
+          {
+            "name": "left",
+            "u": -16.9,
+            "v": 37.9
+          },
+          {
+            "name": "select",
+            "u": -0.1,
+            "v": 38.0,
+            "ring_d": 3.5
+          },
+          {
+            "name": "right",
+            "u": 16.7,
+            "v": 37.9
+          }
+        ],
+        "notes": "Raised stadium key cap with three keys (left, select, right). Stands proud of the back face (side views, Z 34 to 42). Must stay reachable: leave the pill and a finger margin open."
+      },
+      "shutter": {
+        "face": "back",
+        "u": 0.3,
+        "v": 17.1,
+        "d": 15.4,
+        "proud": 0.0,
+        "notes": "Big round grey button with a silver rim. Flush with the back face within 0.1 mm in both side views (no bump in the silhouette at Z 9 to 25). Must stay reachable."
+      },
+      "led": {
+        "face": "back",
+        "u": 25.0,
+        "v": 11.3,
+        "w": 2.0,
+        "h": 2.0,
+        "notes": "Green status LED, a short slanted dash about 1.5 x 0.6 inside a 2 x 2 box. Red when charging. May be covered."
+      },
+      "speaker": {
+        "face": "back",
+        "u": -17.9,
+        "v": 95.3,
+        "w": 7.7,
+        "h": 3.4,
+        "notes": "Three slanted slots (manual: speaker). Key sounds are muted in the modded firmware; may be covered."
+      },
+      "lens": {
+        "face": "front",
+        "u": 0.0,
+        "v": 95.7,
+        "d": 9.1,
+        "proud": 0.0,
+        "notes": "Black lens ring outer diameter. Flush with the front of the thin part (side silhouettes stay at Y 10.8 over Z 91 to 100). Keep the field of view clear: leave a cone, not just the ring."
+      },
+      "panel": {
+        "face": "front",
+        "u": -0.2,
+        "v": 21.5,
+        "w": 58.5,
+        "h": 32.6,
+        "r": 5.2,
+        "u0": -29.5,
+        "u1": 29.0,
+        "v0": 5.2,
+        "v1": 37.8,
+        "y_front": 19.1,
+        "proud": 1.9,
+        "flat_v": [
+          9.7,
+          34.8
+        ],
+        "notes": "Patterned pillow panel on the lower front. Outline from the front view; it reaches Y 19.1 only between flat_v, its edges round off toward the body front (Y 17.2)."
+      },
+      "mode_switch": {
+        "face": "right",
+        "u": 5.4,
+        "v": 21.7,
+        "slot_w": 3.3,
+        "slot_len": 8.6,
+        "slot_u0": 3.8,
+        "slot_u1": 7.1,
+        "slot_v0": 17.4,
+        "slot_v1": 26.1,
+        "frame_grow": 0.7,
+        "knob_d": 3.0,
+        "knob_proud": 1.2,
+        "positions_v": {
+          "off": 19.7,
+          "photo": 21.3,
+          "video": 22.9,
+          "metering": 24.5
+        },
+        "travel": 4.8,
+        "notes": "Slide switch, vertical travel, Off at the bottom. Stadium slot with a raised frame (slot grown by frame_grow). Knob measured at Off: v 19.4, d 3.0, stands about 1.2 past the side (back view 1.4, bottom view 1.0). It is on +X, the right side as seen from the back (left as seen from the front) Must stay reachable: open the slot plus a thumb margin and the knob's full travel."
+      },
+      "lanyard_holes": {
+        "face": "left",
+        "u": 8.2,
+        "holes": [
+          {
+            "u": 8.2,
+            "v": 11.7,
+            "w": 2.4,
+            "h": 1.9
+          },
+          {
+            "u": 8.1,
+            "v": 9.0,
+            "w": 2.3,
+            "h": 1.9
+          }
+        ],
+        "notes": "Two rounded slots joined inside, the strap loops through both. On -X near the bottom. May be covered."
+      },
+      "round_mark": {
+        "face": "left",
+        "u": 14.5,
+        "v": 21.4,
+        "d": 4.6,
+        "notes": "Circle on the rounded edge between the front and the -X side, also seen near the -X edge in the front view at the same height. Not named in the manual. Could be the microphone (the camera streams UAC audio). Leave open if audio matters."
+      },
+      "microsd": {
+        "face": "bottom",
+        "u": 14.4,
+        "v": 5.9,
+        "w": 12.4,
+        "h": 1.4,
+        "notes": "TF slot, card goes in along +Z. May be covered."
+      },
+      "usb_c": {
+        "face": "bottom",
+        "u": -8.1,
+        "u_src": "measured: the port sits about 1.0 toward +X from the bottom view's -9.1",
+        "v": 6.1,
+        "w": 8.9,
+        "h": 2.8,
+        "plug_axis": "+Z (plug pushes up into the camera)",
+        "depth": null,
+        "recess_plan": 1.0,
+        "notes": "Dark opening measured 8.9 x 2.8 (USB-C receptacle spec opening 8.34 x 2.56, shell 8.94 x 3.26). Its face looks flush or slightly recessed; a straight bottom view cannot measure the recess. Plan for the shell face up to 1.0 below the bottom face and check with the real plug. The port sits in the flat bottom strip, its centre 0.7 in front of the seam line. u measured, see u_src."
+      },
+      "reset": {
+        "face": "bottom",
+        "u": -18.4,
+        "v": 5.4,
+        "d": 1.8,
+        "notes": "Pinhole on the seam line. May be covered."
+      },
+      "body": {
+        "corner_r_xz": 13.1,
+        "corner_r_note": "Plan corners seen from the back or front (X-Z), circle fit on all four corners of both views.",
+        "edge_r": 3.7,
+        "edge_r_note": "Rounding of the back face edges (width of the shaded band before the flat back face). The top edge of the thin part is a bullnose of about this radius on both sides (side views: 3.6 mm tall).",
+        "thin": {
+          "y0": 0.0,
+          "y1": 10.8,
+          "z0": 43.5,
+          "z1": 104.1
+        },
+        "lower": {
+          "y0": 0.0,
+          "y1": 17.2,
+          "z0": 0.0,
+          "z1": 38.5
+        },
+        "bump_transition": {
+          "z_top": 43.5,
+          "z_bottom": 38.5,
+          "notes": "Going down the front, the thin face (Y 10.8) curves out from Z 43.5, steepest between Z 41.5 and 39, and reaches the lower body front (Y 17.2) at Z 38.5. S-curve: concave fillet above, convex round below. See side_profile."
+        },
+        "bottom_rounds": {
+          "back": "Back face reaches Y 0 at Z 4; at Z 0.5 the back is at Y 3.0.",
+          "front": "Lower body front (Y 17.2) at Z 6.5 curves down to Y 9.2 at Z 0.5.",
+          "flat_strip_y": [
+            3.0,
+            9.2
+          ],
+          "notes": "The bottom face is flat only in a strip Y 3 to 9; the ports sit in it."
+        },
+        "seam_y": 5.4,
+        "seam_note": "Parting line between the back and front shells, all round (bottom view 5.39, side views 5.3 to 5.4).",
+        "side_profile": [
+          [
+            0.5,
+            2.99,
+            9.18,
+            9.18
+          ],
+          [
+            1.0,
+            2.29,
+            10.72,
+            10.72
+          ],
+          [
+            1.5,
+            1.6,
+            11.96,
+            11.96
+          ],
+          [
+            2.0,
+            1.17,
+            12.97,
+            12.97
+          ],
+          [
+            2.5,
+            0.64,
+            13.82,
+            13.82
+          ],
+          [
+            3.0,
+            0.43,
+            14.57,
+            14.57
+          ],
+          [
+            3.5,
+            0.21,
+            15.16,
+            15.16
+          ],
+          [
+            4.0,
+            0.11,
+            15.53,
+            15.53
+          ],
+          [
+            4.5,
+            0.05,
+            16.05,
+            16.05
+          ],
+          [
+            5.0,
+            0.05,
+            16.43,
+            16.43
+          ],
+          [
+            5.5,
+            0.05,
+            16.8,
+            16.8
+          ],
+          [
+            6.0,
+            0.0,
+            17.13,
+            17.13
+          ],
+          [
+            6.5,
+            0.0,
+            17.18,
+            17.29
+          ],
+          [
+            7.0,
+            0.0,
+            17.18,
+            17.55
+          ],
+          [
+            7.5,
+            0.0,
+            17.18,
+            17.88
+          ],
+          [
+            8.0,
+            0.0,
+            17.18,
+            18.25
+          ],
+          [
+            8.5,
+            0.0,
+            17.18,
+            18.41
+          ],
+          [
+            9.0,
+            0.0,
+            17.18,
+            18.62
+          ],
+          [
+            9.5,
+            0.0,
+            17.18,
+            18.83
+          ],
+          [
+            10.0,
+            0.0,
+            17.18,
+            18.94
+          ],
+          [
+            10.5,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            11.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            11.5,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            12.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            13.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            14.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            15.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            16.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            17.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            18.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            19.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            20.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            21.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            22.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            23.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            24.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            25.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            26.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            27.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            28.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            29.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            30.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            31.0,
+            0.0,
+            17.18,
+            19.1
+          ],
+          [
+            32.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            33.0,
+            0.0,
+            17.18,
+            19.05
+          ],
+          [
+            33.5,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            34.0,
+            0.0,
+            17.18,
+            18.99
+          ],
+          [
+            34.5,
+            0.0,
+            17.18,
+            18.94
+          ],
+          [
+            35.0,
+            0.0,
+            17.18,
+            18.84
+          ],
+          [
+            35.5,
+            0.0,
+            17.18,
+            18.67
+          ],
+          [
+            36.0,
+            0.0,
+            17.18,
+            18.51
+          ],
+          [
+            36.5,
+            0.0,
+            17.18,
+            18.36
+          ],
+          [
+            37.0,
+            0.0,
+            17.18,
+            18.14
+          ],
+          [
+            37.5,
+            0.0,
+            17.18,
+            17.88
+          ],
+          [
+            38.0,
+            0.0,
+            17.18,
+            17.55
+          ],
+          [
+            38.5,
+            0.0,
+            17.13,
+            17.29
+          ],
+          [
+            39.0,
+            0.0,
+            15.89,
+            15.89
+          ],
+          [
+            39.5,
+            0.0,
+            14.68,
+            14.68
+          ],
+          [
+            40.0,
+            0.0,
+            13.82,
+            13.82
+          ],
+          [
+            40.5,
+            0.0,
+            13.12,
+            13.12
+          ],
+          [
+            41.0,
+            0.0,
+            12.54,
+            12.54
+          ],
+          [
+            41.5,
+            0.0,
+            12.06,
+            12.06
+          ],
+          [
+            42.0,
+            0.0,
+            11.68,
+            11.68
+          ],
+          [
+            42.5,
+            0.0,
+            11.31,
+            11.31
+          ],
+          [
+            43.0,
+            0.0,
+            11.04,
+            11.04
+          ],
+          [
+            43.5,
+            0.0,
+            10.88,
+            10.88
+          ],
+          [
+            44.0,
+            0.0,
+            10.83,
+            10.83
+          ],
+          [
+            44.5,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            45.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            46.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            47.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            48.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            49.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            50.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            51.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            52.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            53.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            54.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            55.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            56.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            57.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            58.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            59.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            60.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            61.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            62.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            63.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            64.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            65.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            66.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            67.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            68.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            69.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            70.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            71.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            72.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            73.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            74.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            75.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            76.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            77.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            78.0,
+            0.0,
+            10.83,
+            10.83
+          ],
+          [
+            79.0,
+            0.0,
+            10.83,
+            10.83
+          ],
+          [
+            80.0,
+            0.0,
+            10.83,
+            10.83
+          ],
+          [
+            81.0,
+            0.0,
+            10.83,
+            10.83
+          ],
+          [
+            82.0,
+            0.0,
+            10.83,
+            10.83
+          ],
+          [
+            83.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            84.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            85.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            86.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            87.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            88.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            89.0,
+            0.0,
+            10.78,
+            10.78
+          ],
+          [
+            90.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            91.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            92.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            93.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            94.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            95.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            96.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            97.0,
+            0.11,
+            10.78,
+            10.78
+          ],
+          [
+            98.0,
+            0.16,
+            10.78,
+            10.78
+          ],
+          [
+            98.5,
+            0.16,
+            10.78,
+            10.78
+          ],
+          [
+            99.0,
+            0.16,
+            10.78,
+            10.78
+          ],
+          [
+            99.5,
+            0.16,
+            10.78,
+            10.78
+          ],
+          [
+            100.0,
+            0.16,
+            10.78,
+            10.78
+          ],
+          [
+            100.5,
+            0.27,
+            10.73,
+            10.73
+          ],
+          [
+            101.0,
+            0.54,
+            10.46,
+            10.46
+          ],
+          [
+            101.5,
+            0.85,
+            10.19,
+            10.19
+          ],
+          [
+            102.0,
+            1.23,
+            9.77,
+            9.77
+          ],
+          [
+            102.5,
+            1.65,
+            9.34,
+            9.34
+          ],
+          [
+            103.0,
+            2.29,
+            8.75,
+            8.75
+          ],
+          [
+            103.5,
+            3.15,
+            7.96,
+            7.96
+          ],
+          [
+            104.0,
+            5.17,
+            6.03,
+            6.03
+          ],
+          [
+            104.1,
+            5.17,
+            6.03,
+            6.03
+          ]
+        ],
+        "side_profile_cols": "[Z, Y_back, Y_front_body, Y_front_with_panel] from the two side silhouettes, averaged. Y_front_body is the body without the patterned panel (body side outline under the panel). The pill bump at the back is left out (feature pill).",
+        "plan_bottom": [
+          [
+            0.25,
+            23.47
+          ],
+          [
+            0.75,
+            32.48
+          ],
+          [
+            1.25,
+            33.39
+          ],
+          [
+            1.75,
+            33.85
+          ],
+          [
+            2.25,
+            34.39
+          ],
+          [
+            2.75,
+            35.03
+          ],
+          [
+            3.25,
+            35.21
+          ],
+          [
+            3.75,
+            35.39
+          ],
+          [
+            4.25,
+            35.58
+          ],
+          [
+            4.75,
+            35.67
+          ],
+          [
+            5.25,
+            35.76
+          ],
+          [
+            5.75,
+            35.85
+          ],
+          [
+            6.25,
+            35.85
+          ],
+          [
+            6.75,
+            35.85
+          ],
+          [
+            7.25,
+            35.85
+          ],
+          [
+            7.75,
+            35.67
+          ],
+          [
+            8.25,
+            35.67
+          ],
+          [
+            8.75,
+            35.58
+          ],
+          [
+            9.25,
+            35.39
+          ],
+          [
+            9.75,
+            35.3
+          ],
+          [
+            10.25,
+            35.12
+          ],
+          [
+            10.75,
+            34.94
+          ],
+          [
+            11.25,
+            34.76
+          ],
+          [
+            11.75,
+            34.58
+          ],
+          [
+            12.25,
+            34.3
+          ],
+          [
+            12.75,
+            34.12
+          ],
+          [
+            13.25,
+            33.76
+          ],
+          [
+            13.75,
+            33.48
+          ],
+          [
+            14.25,
+            33.21
+          ],
+          [
+            14.75,
+            32.75
+          ],
+          [
+            15.25,
+            32.48
+          ],
+          [
+            15.75,
+            31.93
+          ],
+          [
+            16.25,
+            31.48
+          ],
+          [
+            16.75,
+            30.84
+          ],
+          [
+            17.25,
+            30.57
+          ],
+          [
+            17.75,
+            29.39
+          ],
+          [
+            18.25,
+            28.57
+          ],
+          [
+            18.75,
+            27.93
+          ]
+        ],
+        "plan_bottom_cols": "[Y, half width X] of the silhouette seen from below (widest at any Z), from the -X side. The panel region (Y > 17.2) is the panel's underside.",
+        "model_hint": [
+          "Thin plate: X 71.7 x Z 104.1 rounded rectangle (corner_r_xz), Y 0 to thin.y1, edges rounded edge_r.",
+          "Lower block: same plan corners at the bottom, Y 0 to lower.y1, Z 0 to lower.z1; front vertical edges rounded about 5.5 in X by 10 in Y (plan_bottom); bottom edges per bottom_rounds.",
+          "Blend the block into the plate between bump_transition.z_bottom and z_top (side_profile).",
+          "Panel: rounded rectangle from features.panel on the block front, Y lower.y1 to 19.1, edges rounded.",
+          "Pill: stadium from features.pill, 0.35 proud of the back. Knob: cylinder knob_d on +X at mode_switch, knob_proud out."
+        ]
+      }
+    },
+    "mass_g": 65,
+    "mass_estimate": false,
+    "mass_src": "https://godox.us/godox/godox-c100-transparent-viewfinder-camera (65 g, as quoted in parts.json src)"
+  },
+  "cap_470u_63": {
+    "name": "Panasonic EEU-FR0J471, 470 uF 6.3 V low-ESR electrolytic",
+    "src": "https://www.tme.com/ca/en/details/eeufr0j471/tht-electrolytic-capacitors/panasonic",
+    "estimate": false,
+    "size": [
+      6.3,
+      6.3,
+      11.2
+    ],
+    "price_usd": null,
+    "frame": "Axis along Z, origin at the centre of the bottom (lead) end",
+    "notes": "6.3 x 11.2 (TME listing); one, at the plug board",
+    "mass_g": 0.6,
+    "mass_estimate": true,
+    "mass_src": "not published; estimate for a 6.3 x 11 can",
+    "features": {
+      "leads": {
+        "pitch": 2.5,
+        "d": 0.5,
+        "notes": "radial, out of the can's Z = 0 end; 2.5 spacing and 0.5 wire usual for a 6.3 can, estimate (not read off Panasonic's drawing)"
+      }
+    }
+  },
+  "usb_c_plug_ada5978": {
+    "name": "Adafruit USB Type C Plug Breakout #5978",
+    "src": "https://www.adafruit.com/product/5978",
+    "estimate": true,
+    "size": [
+      13.97,
+      23.98,
+      3.25
+    ],
+    "price_usd": 2.95,
+    "notes": "Bounding box of Adafruit's STL (github.com/adafruit/Adafruit_CAD_Parts, 5978 USB-C Plug Breakout; STEP and F3D there too); listing says 24.1 x 14.3 x 3.1. Plug points along the 23.98 axis. Pads GND, VBUS, CC1, D-, D+.",
+    "features": {
+      "board": {
+        "x0": -6.985,
+        "x1": 6.985,
+        "y0": -2.02,
+        "y1": -0.45,
+        "z0": -17.33,
+        "z1": -4.63
+      },
+      "cc_jumper": {
+        "points_xz": [
+          1.016,
+          -11.234
+        ],
+        "face": "back",
+        "notes": "SJ1 on the back (flat) face, marked CC and 5.1K: a closed solder jumper from CC1 to the 5.1k pull-down R2; cut its trace to take the 5.1k off (board file)"
+      },
+      "holes": {
+        "d": 2.5,
+        "points_xz": [
+          [
+            -4.445,
+            -9.71
+          ],
+          [
+            4.445,
+            -9.71
+          ]
+        ]
+      },
+      "mating_len": 6.65,
+      "pins": {
+        "points_xz": {
+          "GND": [
+            -5.08,
+            -14.79
+          ],
+          "D-": [
+            -2.54,
+            -14.79
+          ],
+          "D+": [
+            0.0,
+            -14.79
+          ],
+          "CC1": [
+            2.54,
+            -14.79
+          ],
+          "VBUS": [
+            5.08,
+            -14.79
+          ]
+        },
+        "drill": 1.0,
+        "pad_d": 1.93,
+        "notes": "JP2, 5 holes at 2.54 along the board's back edge, from Adafruit's board file (github.com/adafruit/Adafruit-USB-Type-C-Plug-Breakout-PCB, 'Adafruit USB Type C Plug Breakout.brd'): pad 1 GND, 2 D-, 3 D+, 4 CC1, 5 VBUS, silk VBUS CC1 D+ D- GND; Eagle x 0 to 13.97 maps to -X here (x = 6.985 - x_eagle), Eagle y from the back edge (z = -17.33 + y_eagle)"
+      },
+      "rear": {
+        "x0": -4.375,
+        "x1": 4.375,
+        "y0": -2.05,
+        "y1": 1.2,
+        "z0": -6.96,
+        "z1": -4.63
+      },
+      "shell": {
+        "x0": -4.125,
+        "x1": 4.125,
+        "y0": -1.2,
+        "y1": 1.2,
+        "z0": -4.63,
+        "z1": 6.65
+      }
+    },
+    "mass_g": 1.1,
+    "mass_estimate": false,
+    "mass_src": "https://www.adafruit.com/product/5978 (Product Weight: 1.1g)"
+  },
+  "lipo_1200": {
+    "name": "Adafruit LiPo 3.7 V 1200 mAh #258",
+    "src": "https://www.adafruit.com/product/258",
+    "estimate": true,
+    "size": [
+      34.0,
+      62.0,
+      5.0
+    ],
+    "price_usd": 9.95,
+    "features": {
+      "leads": {
+        "w": 6.0,
+        "t": 3.0,
+        "len": 3.0,
+        "notes": "JST-PH lead bent right at the cell end, estimate; the leads leave the 34 mm end (product photo)"
+      }
+    },
+    "mass_g": 23,
+    "mass_estimate": false,
+    "mass_src": "https://www.adafruit.com/product/258 (Weight: 23g)"
+  },
+  "lipo_rider_plus": {
+    "name": "Seeed Lipo Rider Plus (ETA9740), 5 V 2.4 A",
+    "src": [
+      "https://www.digikey.com/en/products/detail/seeed-technology-co-ltd/106990290/10451861",
+      "https://files.seeedstudio.com/wiki/Lipo-Rider-Plus/img/202002729_Lipo_Rider_Plus.zip (Seeed's Eagle files from the wiki resources; 'Lipo Rider Plus.brd' read for the outline, holes and footprints)",
+      "https://wiki.seeedstudio.com/Lipo-Rider-Plus (2.5 x 4.1 cm, JST 2.0 battery port, 5 V switch, 4-segment and charge LEDs)",
+      "https://media-cdn.seeedstudio.com/media/catalog/product/cache/bb49d3ec4ee05b6f018e93f896b8a25d/l/i/lipo-rider-plus-v1.0-front.jpg , -preview.jpg , -connect.jpg (product photos: switch type and silk, mated JST plug, PCB edge)",
+      "https://www.jst-mfg.com/product/pdf/eng/ePH.pdf (PH SM4 side-entry header outline 4.8 high)"
+    ],
+    "estimate": true,
+    "size": [
+      40.877,
+      25.48,
+      6.4
+    ],
+    "size_notes": "Outline 40.88 x 25.48, corners r 1.27, from the board file (Seeed states 2.5 x 4.1 cm). Height = PCB + JST header. PCB thickness and part heights are not published: estimates, see each feature.",
+    "price_usd": 4.9,
+    "frame": "Board frame of the Eagle file moved to the board corner: X along the 40.9 edge from the USB-C and JST edge (Eagle x), Y across from the pin header edge (Eagle y - 2.5), Z up from the PCB underside; all parts on top",
+    "features": {
+      "pcb": {
+        "x0": 0.0,
+        "x1": 40.877,
+        "y0": 0.0,
+        "y1": 25.48,
+        "z0": 0.0,
+        "z1": 1.6,
+        "r": 1.27,
+        "rgb": [
+          0.08,
+          0.22,
+          0.55
+        ],
+        "notes": "outline from the board file; thickness 1.6 estimate (not published; matches the PCB edge against the USB-C receptacle in the perspective photo)"
+      },
+      "holes": {
+        "d": 3.0,
+        "points_xy": [
+          [
+            10.778,
+            2.54
+          ],
+          [
+            10.778,
+            23.067
+          ],
+          [
+            38.337,
+            2.54
+          ],
+          [
+            38.337,
+            23.067
+          ]
+        ],
+        "notes": "4 holes, board file"
+      },
+      "parts_low": {
+        "x0": 6.1,
+        "x1": 31.37,
+        "y0": 0.89,
+        "y1": 22.01,
+        "z0": 1.6,
+        "z1": 3.4,
+        "notes": "envelope over the small parts (ETA9740 ESOP8, 1812 fuse, 0402 to 0805 passives, SOT-23, DFN), area from the footprints; 1.8 tall, estimate"
+      },
+      "usb_c": {
+        "x0": -0.873,
+        "x1": 6.477,
+        "y0": 2.779,
+        "y1": 11.779,
+        "z0": 1.6,
+        "z1": 4.8,
+        "opening": "-x",
+        "notes": "16-pin top-mount receptacle, body 7.35 x 9.0 from the footprint, mouth 0.87 past the edge (footprint and photo agree); 3.2 tall, estimate"
+      },
+      "jst": {
+        "x0": 0.762,
+        "x1": 8.636,
+        "y0": 14.645,
+        "y1": 22.773,
+        "z0": 1.6,
+        "z1": 6.4,
+        "opening": "-x",
+        "pins_y": {
+          "+": 19.709,
+          "-": 17.709
+        },
+        "notes": "JST 2.0 (PH) right-angle SMD header, Seeed 320110026, footprint keep-out; 4.8 tall from the JST PH SM4 side-entry outline, assumed the same (estimate)"
+      },
+      "switch": {
+        "x0": 25.273,
+        "x1": 31.877,
+        "y0": 21.289,
+        "y1": 24.083,
+        "z0": 1.6,
+        "z1": 3.1,
+        "notes": "5 V output slide switch, lever on top, slides along X; body from the footprint keep-out, 1.5 tall estimate from the photos"
+      },
+      "lever": {
+        "x0": 27.305,
+        "x1": 29.845,
+        "y0": 22.051,
+        "y1": 23.321,
+        "z0": 1.6,
+        "z1": 4.8,
+        "off": "-x",
+        "notes": "the lever's travel slot (footprint document layer); OFF toward -x, ON toward +x (silk 'OFF 5V ON' in the photo); 3.2 overall from the footprint name SW7-SMD-L6.7X2.7X3.2MM, estimate"
+      },
+      "inductor": {
+        "x0": 18.796,
+        "x1": 22.606,
+        "y0": 16.169,
+        "y1": 21.249,
+        "z0": 1.6,
+        "z1": 4.6,
+        "notes": "L1 footprint; 3.0 tall from the footprint name L4.4X3.0MM, estimate"
+      },
+      "leds": {
+        "x0": 12.89,
+        "x1": 22.72,
+        "y0": 22.81,
+        "y1": 24.85,
+        "z0": 1.6,
+        "z1": 2.1,
+        "notes": "0402 LEDs D2 to D5 (battery level) and D7 (lit from the 5 V net through R3, so on while 5 V is out); footprints read, 0.5 tall estimate"
+      },
+      "out_5v": {
+        "x0": 30.577,
+        "x1": 32.777,
+        "y0": 8.667,
+        "y1": 17.067,
+        "z0": 1.6,
+        "z1": 3.1,
+        "pads": {
+          "5V": [
+            31.677,
+            9.367
+          ],
+          "GND": [
+            31.677,
+            16.367
+          ]
+        },
+        "notes": "the USB-A's pads 1 (5V) and 4 (GND) with the leads soldered on; joints 1.5 tall, estimate"
+      },
+      "header": {
+        "points_xy": [
+          [
+            14.224,
+            1.437
+          ],
+          [
+            16.764,
+            1.437
+          ],
+          [
+            19.304,
+            1.437
+          ],
+          [
+            21.844,
+            1.437
+          ],
+          [
+            24.384,
+            1.437
+          ],
+          [
+            26.924,
+            1.437
+          ],
+          [
+            29.464,
+            1.437
+          ],
+          [
+            32.004,
+            1.437
+          ]
+        ],
+        "pad_d": 1.651,
+        "pins": [
+          "VUSB",
+          "GND",
+          "BAT",
+          "GND",
+          "5V",
+          "GND",
+          "EN",
+          "3V3"
+        ],
+        "notes": "J3, 8 holes at 2.54 along the pin header edge, pin 1 toward the USB-C end; board file (element J3 at Eagle 23.114, 3.937, R90), nets read from it; wires soldered in"
+      },
+      "flat_legs": {
+        "points_xy": [
+          [
+            1.727,
+            2.979
+          ],
+          [
+            1.727,
+            11.579
+          ],
+          [
+            5.927,
+            2.979
+          ],
+          [
+            5.927,
+            11.579
+          ]
+        ],
+        "size_xy": [
+          2.2,
+          1.1
+        ],
+        "notes": "through-hole legs whose ends may stand proud of the flat side: the USB-C's four shell legs (USB2 S1-S4), board file, the long pads 2.2 x 1.1 along X; the cut USB-A's tab stubs (J2 S1-S4) removed"
+      }
+    },
+    "mass_g": 4.8,
+    "mass_estimate": true,
+    "mass_src": "not published; PCB 1.62 cm3 of FR4 at 1.85 g/cm3 = 3.0 g, plus about 1.8 g of parts without the USB-A (estimate)",
+    "notes": "The USB-A socket comes off: its pads 1 (5 V) and 4 (GND) carry the camera's power; the 8-hole header's 5 V and GND carry the same nets."
+  },
+  "pi_zero_w": {
+    "name": "Raspberry Pi Zero W",
+    "frame": "Origin at the board corner where the port edge (mini-HDMI, micro-USB) meets the microSD end, the datum of the official drawing. X along the 65 mm edge toward the power port, Y across toward the GPIO header edge, Z up from the board underside (board top at Z = t). The power port corner is (65, 0). Faces: top: u = X, v = Y. port_edge (Y = 0): u = X, v = Z. sd_edge (X = 0): u = Y, v = Z. csi_edge (X = 65): u = Y, v = Z. Boxes give x0, x1, y0, y1, z0, z1 in the board frame.",
+    "src": [
+      "https://pip-assets.raspberrypi.com/categories/592-raspberry-pi-zero-w/documents/RP-008367-DS-1-raspberry-pi-zero-w-mechanical-drawing.pdf",
+      "https://pip.raspberrypi.com/documents/RP-008358-DS-raspberry-pi-zero-2-w-mechanical-drawing.pdf (pin 1 square pad, same layout)",
+      "https://pip-assets.raspberrypi.com/categories/592-raspberry-pi-zero-w/documents/RP-008368-DS-1-raspberry-pi-zero-w-reduced-schematics.pdf (part numbers)",
+      "https://datasheet.octopart.com/690-019-298-903-EDAC-datasheet-123065370.pdf (mini-HDMI EDAC 690-019-298-903)",
+      "https://learn.adafruit.com/introducing-the-raspberry-pi-zero (65 x 30 x 5 mm overall, micro-USB lips add about 1 mm)",
+      "https://quorten.github.io/quorten-blog1/blog/2020/03/12/rpi-screw-standoff-dims and https://community.element14.com/products/raspberry-pi/f/forum/6960/thickness-of-raspberrypi3-pcb (PCB 1.4, measured 1.45 to 1.63 on Pi 3)"
+    ],
+    "estimate": true,
+    "estimate_note": "XY numbers are from the official drawing (measured off it where not dimensioned, 11.26 px/mm). Heights (Z) are estimates: each feature says so.",
+    "size": [
+      65.0,
+      30.0,
+      1.4
+    ],
+    "features": {
+      "holes": {
+        "face": "top",
+        "points": [
+          [
+            3.5,
+            3.5
+          ],
+          [
+            61.5,
+            3.5
+          ],
+          [
+            3.5,
+            26.5
+          ],
+          [
+            61.5,
+            26.5
+          ]
+        ],
+        "d": 2.75,
+        "pad_d": 6.0,
+        "notes": "M2.5. pad_d is the copper ring in the drawing: keep standoffs within it."
+      },
+      "gpio_header": {
+        "face": "top",
+        "u": 32.5,
+        "v": 26.5,
+        "x0": 7.1,
+        "x1": 57.9,
+        "y0": 23.96,
+        "y1": 29.04,
+        "pitch": 2.54,
+        "rows": 2,
+        "cols": 20,
+        "pin1": [
+          8.37,
+          25.23
+        ],
+        "body_h": 2.5,
+        "pin_h_above_board": 8.5,
+        "z_body_top": 3.9,
+        "z_pin_top": 9.9,
+        "tail_below_underside": 1.6,
+        "estimate_h": true,
+        "notes": "XY from the drawing (centre 29 from the left hole, 3.5 from the header edge). Heights are the common 2.54 mm male header (2.5 plastic, 6.0 mating pin, 3.0 tail). Pin 1 is the square pad at the microSD end, row nearer the board centre."
+      },
+      "gpio_clearance": {
+        "face": "top",
+        "x0": 5.1,
+        "x1": 59.9,
+        "y0": 21.96,
+        "y1": 31.04,
+        "z0": 1.4,
+        "z1": 12.0,
+        "below": {
+          "z0": -2.5,
+          "z1": 0.0,
+          "x0": 6.1,
+          "x1": 58.9,
+          "y0": 22.96,
+          "y1": 30.0
+        },
+        "notes": "Keep-out for the bent pins: header body grown 2 mm each way, 2.1 mm over the pin tips; reaches 1.04 mm past the header edge of the board. 'below' covers the solder tails."
+      },
+      "mini_hdmi": {
+        "face": "port_edge",
+        "u": 12.4,
+        "x0": 7.02,
+        "x1": 17.85,
+        "y0": -0.62,
+        "y1": 6.93,
+        "z0": 1.4,
+        "z1": 4.6,
+        "opening_w": 10.5,
+        "opening_h": 2.5,
+        "shell_w_tabs": 11.2,
+        "estimate_h": true,
+        "notes": "EDAC 690-019-298-903. Front face 0.62 past the board edge. Height above the board about 3.2 (datasheet side view, read off the drawing)."
+      },
+      "usb_data": {
+        "face": "port_edge",
+        "u": 41.4,
+        "x0": 37.65,
+        "x1": 45.11,
+        "y0": -1.24,
+        "y1": 4.71,
+        "z0": 1.4,
+        "z1": 4.0,
+        "flange_w": 8.08,
+        "estimate_h": true,
+        "notes": "Micro-USB OTG data port (silkscreen USB), EDAC 690-005-298-486. Body 7.46 wide, flange 8.08 wide from y -0.62 to -1.24. Height about 2.6 above the board (typical micro-B, not read off its drawing)."
+      },
+      "usb_power": {
+        "face": "port_edge",
+        "u": 54.0,
+        "x0": 50.26,
+        "x1": 57.72,
+        "y0": -1.24,
+        "y1": 4.71,
+        "z0": 1.4,
+        "z1": 4.0,
+        "flange_w": 8.08,
+        "estimate_h": true,
+        "notes": "Micro-USB power in (silkscreen PWR IN), the one nearer the corner. Same part and heights as usb_data."
+      },
+      "microsd": {
+        "face": "sd_edge",
+        "u": 16.95,
+        "socket": {
+          "x0": 1.69,
+          "x1": 13.14,
+          "y0": 10.83,
+          "y1": 22.82,
+          "z0": 1.4,
+          "z1": 2.9
+        },
+        "card": {
+          "x0": -2.31,
+          "x1": 12.69,
+          "y0": 11.45,
+          "y1": 22.47,
+          "z0": 1.6,
+          "z1": 2.6
+        },
+        "card_sticks_out": 2.31,
+        "estimate_h": true,
+        "notes": "Push-pull socket on the top side. Card 11 x 15 x 1.0; its tail sticks 2.31 past the board edge in the official drawing. Leave about 6 mm past the edge to grip and pull it. Socket height about 1.5, estimate."
+      },
+      "csi": {
+        "face": "csi_edge",
+        "u": 15.0,
+        "x0": 61.63,
+        "x1": 65.0,
+        "y0": 6.93,
+        "y1": 23.0,
+        "z0": 1.4,
+        "z1": 2.6,
+        "estimate_h": true,
+        "notes": "22-pin 0.5 mm FPC connector, Molex 54548-2271, opening faces +X at the board edge. Height about 1.2, estimate. Not used here."
+      },
+      "board": {
+        "x": 65.0,
+        "y": 30.0,
+        "t": 1.4,
+        "t_range": [
+          1.4,
+          1.6
+        ],
+        "t_estimate": true,
+        "corner_r": 3.0,
+        "overall_height_with_parts": 5.0,
+        "notes": "Size slots for t = 1.6. Underside is flat apart from test pads and the header solder tails."
+      },
+      "headerless": {
+        "pins": [
+          1,
+          3,
+          5,
+          6
+        ],
+        "joint_h": 1.5,
+        "notes": "header=off: no header, 4 wires soldered into pins 1, 3, 5, 6. Keep-out above the board: its tallest part (the mini-HDMI, z1 in parts.json) plus joint_h for the wire joints, over the whole board. Measured, estimate."
+      },
+      "test_pads": {
+        "face": "underside",
+        "points": {
+          "PP1": [
+            53.8,
+            6.3
+          ],
+          "PP6": [
+            54.1,
+            3.5
+          ],
+          "PP22": [
+            42.0,
+            1.85
+          ],
+          "PP23": [
+            40.15,
+            1.85
+          ]
+        },
+        "d": 1.5,
+        "nets": {
+          "PP1": "5V",
+          "PP6": "GND",
+          "PP22": "USB D+",
+          "PP23": "USB D-"
+        },
+        "notes": "PiZeroHat KiCad footprint (github.com/vasya-zh/PiZeroHat, lib/Raspberry_Pi_Zero_v.1.3_Hat.pretty/RASPI_ZERO_FULL.kicad_mod; its x = 65 - x, y = -y of this frame), made for Zero v1.3, Zero W and Zero 2 W; d is its pogo pad (1.5 to 1.7), about the test pad"
+      }
+    },
+    "mass_g": 9,
+    "mass_estimate": false,
+    "mass_src": "https://www.raspberrypi.com/news/what-can-you-build-with-raspberry-pi-zero/ (Weight: 9g, Zero / Zero W / Zero WH)"
+  }
+}

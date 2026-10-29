@@ -2,6 +2,14 @@
 
 <p align="center"><img src="firmware/docs/c100.jpg" alt="Godox C100" width="420"></p>
 
+Mods for the Godox C100 card camera:
+
+- [Firmware](#firmware): patches for its firmware, a USB webcam among them.
+- [Case](case/README.md): a printed case that docks it to a Raspberry Pi Zero W, a battery and a
+  small OLED.
+
+## Firmware
+
 Patches for the firmware of the Godox C100 card camera.
 
 The patches are added on top of Godox's stock firmware, which is then installed the official way.
@@ -25,7 +33,7 @@ Here are some other projects that also patch the firmware:
 
 Unofficial. A bad flash can brick the camera; read [Recovery](#recovery) first.
 
-## What it does
+### What it does
 
 Tested on a C100 with a V1.1.6 build:
 
@@ -50,12 +58,12 @@ Limits:
 - After the camera has been a USB drive (on a PC or a charger), power-cycle it before using the webcam.
 - No audio over USB.
 
-## Download
+### Download
 
 The [Releases](../../releases) page has a ready `GP_CARDVR_UPGRADE.BIN` and its `SHA256SUMS`;
 skip to [Flash](#flash). Or build it:
 
-## Build
+### Build
 
 Needs the stock firmware V1.1.6
 ([Godox_C100_V1.1.6.zip](https://www.godox.com/Downloads/Godox_C100_V1.1.6.zip), linked from the
@@ -71,7 +79,7 @@ Emulator tests, in `firmware/`: `uv run --group test python tests/test_v5.py bui
 
 `firmware/release.sh STOCK.BIN` builds, runs the tests and stages the release files in `firmware/dist/`.
 
-## Flash
+### Flash
 
 1. Charge the battery.
 2. Copy `firmware/build/GP_CARDVR_UPGRADE.BIN` to the root of the microSD card.
@@ -79,12 +87,12 @@ Emulator tests, in `firmware/`: `uv run --group test python tests/test_v5.py bui
    deletes the file and restarts by itself. The clock resets. Only the first card mount after
    power-on can flash: if nothing happens, switch off and on again with the card in.
 
-## Recovery
+### Recovery
 
 Flash the stock V1.1.6 `GP_CARDVR_UPGRADE.BIN` the same way. The card updater is part of the
 firmware's app and runs on the first card mount after power-on. Details in `firmware/docs/firmware.md` and `firmware/docs/hooks.md`.
 
-## C100.TXT
+### C100.TXT
 
 Optional, in the card root, read at every card mount. The defaults, commented out:
 
@@ -111,7 +119,7 @@ Optional, in the card root, read at every card mount. The defaults, commented ou
     #led_off43=0
     #led_off95=0
 
-## CMD.TXT
+### CMD.TXT
 
 Commands, one per line, in the card root. Checked about every 3 s while the camera has the card
 (so soon after power-on, a card insert or a USB-drive eject), deleted, then run; results go to
@@ -129,7 +137,7 @@ Commands, one per line, in the card root. Checked about every 3 s while the came
     drive               restart as the USB drive, whatever the switch, for that boot only
                         (firmware/docs/usb.md). Not yet tested on the camera
 
-## Commands from the PC
+### Commands from the PC
 
 While the camera is the webcam, a Linux PC can send it one `CMD.TXT` line at a time, also while
 another program streams from it:
@@ -143,13 +151,13 @@ ID (`--device /dev/videoN` to pick one) and needs only Python 3.11. Lines up to 
 The camera takes a line only while it has a card and the patch loaded. The line goes through a
 UVC extension unit (firmware/docs/webcam.md). Not yet tested on the camera.
 
-## LOG.TXT
+### LOG.TXT
 
 Only with `log=on` in `C100.TXT`. Appended about every 2 s while the camera has the card. Blocks
 start with `== <ms since boot> <day>d HH:MM:SS`. Lines tagged `[v5]` come from the patch, the rest
 is the firmware's own output. Log rotation is not supported.
 
-## USB
+### USB
 
 The camera enumerates only when the cable goes into a camera that is already on.
 
@@ -166,7 +174,7 @@ The camera enumerates only when the cable goes into a camera that is already on.
   `v4l2-ctl --set-fmt-video=width=256,height=144,pixelformat=MJPG`. Only 1920x1080 is tested on
   the camera so far.
 
-## Docs
+### Docs
 
 - `firmware/docs/hardware.md`: board, screen, LED, buttons, pins
 - `firmware/docs/firmware.md`: image layout, boot, card updater, recovery limits
@@ -174,6 +182,15 @@ The camera enumerates only when the cable goes into a camera that is already on.
 - `firmware/docs/usb.md`: USB modes and the states behind them, one boot as the webcam or the drive
 - `firmware/docs/webcam.md`: 1080p, frame sizes, left/right and recording while streaming, the extension
   unit
+
+## Case
+
+<p align="center"><img src="case/images/case.jpg" alt="the case" width="360"></p>
+
+A two-part printed case: the camera sits in a cup on top, a USB-C plug in its floor; inside, a
+Raspberry Pi Zero W, a 1200 mAh cell with its charger, and on the back a 128x64 1-bit OLED. The
+Pi runs [ghee](https://github.com/holofermes/ghee) to draw on the OLED. Parts, printing and
+wiring: [case/README.md](case/README.md). In 3D: https://holofermes.github.io/godox-c100-mods/
 
 ## Credits
 

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Godox C100 case</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #6b6d70; overflow: hidden; }
+  #info { position: absolute; top: 8px; left: 10px; color: #f1ede6;
+          font: 12px ui-monospace, monospace; text-shadow: 0 1px 2px #000; }
+  canvas { display: block; }
+  #modes { position: absolute; top: 8px; right: 10px; display: flex; gap: 4px; }
+  #modes button { font: 12px ui-monospace, monospace; padding: 6px 10px; border: 0;
+                  border-radius: 4px; background: #3d3f42; color: #f1ede6; cursor: pointer; }
+  #modes button.on { background: #f1ede6; color: #2a2b2d; }
+  #picked { position: absolute; top: 26px; left: 10px; max-width: 60%; color: #f1ede6;
+            font: 12px ui-monospace, monospace; text-shadow: 0 1px 2px #000; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+</head>
+<body>
+<div id="info">loading</div>
+<div id="picked"></div>
+<div id="modes"><button data-m="solid">1 solid</button><button data-m="xray">2 x-ray</button><button data-m="wire">3 wire</button><button id="partsonly">p parts only</button></div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const info = document.getElementById("info");
+const params = new URLSearchParams(location.search);
+const src = params.get("glb") ?? "case.glb";
+
+// x-ray: printed bodies and the camera turn to glass, bought parts stay solid. Roles come from
+// the build's render.json, beside the glb as <name>.json; without it everything turns half see-through.
+// p hides the printed bodies and the camera; a click on a part selects it, the rest fades.
+const MODES = ["solid", "xray", "wire"];
+let mode = MODES.includes(params.get("mode")) ? params.get("mode") : "solid";
+let partsOnly = params.get("parts") === "1";
+let picked = null;  // the node clicked
+const roles = {};
+const meshes = [];
+function roleOf(obj) {
+  for (let o = obj; o; o = o.parent) if (o.name in roles) return roles[o.name];
+  return null;
+}
+function nodeOf(obj) {
+  for (let o = obj; o; o = o.parent) if (o.name in roles) return o.name;
+  return null;
+}
+const printed = role => role === "body" || role === "camera";
+function pick(node) {
+  picked = node;
+  apply();
+}
+function apply() {
+  for (const { mesh, base } of meshes) {
+    const m = mesh.material;
+    m.copy(base);
+    const role = roleOf(mesh);
+    if (mode === "wire") m.wireframe = true;
+    if (mode === "xray" && role !== "part") {
+      m.transparent = true;
+      m.depthWrite = false;
+      m.opacity = role === "body" ? 0.18 : role === "camera" ? 0.22 : 0.4;
+    }
+    if (picked && nodeOf(mesh) !== picked) {
+      m.transparent = true;
+      m.depthWrite = false;
+      m.opacity = printed(role) ? 0.05 : 0.1;
+    }
+    mesh.visible = !(mode !== "solid" && /keepout/.test(mesh.name + (mesh.parent?.name ?? "")))
+      && !(partsOnly && printed(role));
+    m.needsUpdate = true;
+  }
+  for (const b of document.querySelectorAll("#modes button[data-m]")) b.classList.toggle("on", b.dataset.m === mode);
+  document.getElementById("partsonly").classList.toggle("on", partsOnly);
+  document.getElementById("picked").textContent = picked ?? "";
+  params.set("mode", mode);
+  partsOnly ? params.set("parts", "1") : params.delete("parts");
+  history.replaceState(null, "", `?${params}`);
+}
+function setMode(m) {
+  mode = m;
+  apply();
+}
+for (const b of document.querySelectorAll("#modes button[data-m]")) b.onclick = () => setMode(b.dataset.m);
+document.getElementById("partsonly").onclick = () => { partsOnly = !partsOnly; apply(); };
+// keys by their place on the keyboard too (Caps Lock, other layouts), taken before the browser's
+// own find-as-you-type
+addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const codes = { Digit1: "1", Digit2: "2", Digit3: "3", KeyP: "p" };
+  const key = codes[e.code] ?? e.key.toLowerCase();
+  const i = key.length === 1 ? "123".indexOf(key) : -1;
+  if (i >= 0) setMode(MODES[i]);
+  else if (key === "p") { partsOnly = !partsOnly; apply(); }
+  else if (key === "escape") pick(null);
+  else return;
+  e.preventDefault();
+}, true);
+fetch(src.replace(/\.glb$/, ".json"))
+  .then(r => (r.ok ? r.json() : null))
+  .then(j => {
+    for (const o of j?.objects ?? []) roles[o.name] = o.role;
+    apply();
+  })
+  .catch(() => {});
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x6b6d70);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404048, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(-1, -2, 3);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xffffff, 0.8);
+rim.position.set(2, 3, 1);
+scene.add(rim);
+
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.001, 100);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+new GLTFLoader().load(src, gltf => {
+  const root = gltf.scene;
+  root.rotation.x = Math.PI / 2;  // glTF is Y up; the case frame is Z up
+  scene.add(root);
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    o.material = o.material.clone();
+    meshes.push({ mesh: o, base: o.material.clone() });
+  });
+  apply();
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const r = size.length() / 2;
+  const d = r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
+  camera.position.copy(centre).add(new THREE.Vector3(-0.55, -1, 0.5).normalize().multiplyScalar(d));
+  camera.near = d / 100; camera.far = d * 10; camera.updateProjectionMatrix();
+  controls.target.copy(centre);
+  controls.update();
+  const mm = size.clone().multiplyScalar(1000);
+  info.textContent = `${src.split("/").pop()}  ${mm.x.toFixed(0)} x ${mm.y.toFixed(0)} x ${mm.z.toFixed(0)} mm`;
+}, undefined, err => { info.textContent = `failed: ${err.message || err}`; });
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+// a click (not a drag) on a part picks it; on nothing, or on a printed body, clears
+const ray = new THREE.Raycaster();
+let down = null;
+renderer.domElement.addEventListener("pointerdown", e => { down = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!down || e.button !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+  const ndc = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(meshes.map(x => x.mesh).filter(m => m.visible), false);
+  const hit = hits.map(h => nodeOf(h.object)).find(n => n && !printed(roles[n]));
+  pick(hit ?? null);
+});
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>

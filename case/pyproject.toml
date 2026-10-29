@@ -1,0 +1,27 @@
+[project]
+name = "c100-case"
+version = "0.1.0"
+description = "3D printed case for the Godox C100 with a Raspberry Pi Zero W, a cell and an OLED"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "build123d==0.13.0",
+    "pillow",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+include = ["lib/**/*.py", "designs/**/*.py", "tools/*.py", "wiring.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "E741"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[dependency-groups]
+dev = ["ruff"]
