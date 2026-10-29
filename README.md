@@ -1,6 +1,6 @@
 # godox-c100-mods
 
-<p align="center"><img src="firmware/docs/c100.jpg" alt="Godox C100" width="420"></p>
+<p align="center"><img src="case/images/case.jpg" alt="Godox C100 in the case" width="420"></p>
 
 Mods for the Godox C100 card camera:
 
@@ -9,6 +9,8 @@ Mods for the Godox C100 card camera:
   small OLED.
 
 ## Firmware
+
+<p align="center"><img src="firmware/docs/c100.jpg" alt="Godox C100" width="360"></p>
 
 The patches are added on top of Godox's stock firmware, which is then installed the official way.
 
@@ -183,7 +185,7 @@ The camera enumerates only when the cable goes into a camera that is already on.
 
 ## Case
 
-<p align="center"><img src="case/images/case.jpg" alt="the case" width="360"></p>
+<p align="center"><img src="case/images/render.jpg" alt="the case" width="360"></p>
 
 A two-part printed case: the camera sits in a cup on top, a USB-C plug in its floor; inside, a
 Raspberry Pi Zero W, a 1200 mAh cell with its charger, and on the back a 128x64 1-bit OLED. The

@@ -1,6 +1,6 @@
 # Case
 
-<p align="center"><img src="images/case.jpg" alt="the case with the camera in it" width="420"></p>
+<p align="center"><img src="images/render.jpg" alt="the case with the camera in it" width="420"></p>
 
 A printed case in two halves. The C100 sits in a cup on top, with a USB-C plug in the cup's floor
 going into its port. Inside: a Raspberry Pi Zero W, a 1200 mAh cell and its charger, and a 128x64
