@@ -1,4 +1,4 @@
-# Canary tests under emulation (docs/hooks.md). usage, from the repo root after CANARY=1 ./build.sh:
+# Canary tests under emulation (docs/hooks.md). usage, from firmware/ after CANARY=1 ./build.sh:
 #   uv run --group test python tests/test_canary.py build-canary/GP_CARDVR_UPGRADE.BIN obj-canary/v5.sym [BASE]
 # BASE defaults to obj-canary/base.bin, the image tools/patch.py patched.
 # Not with python -I: it drops the script directory and the imports fail.

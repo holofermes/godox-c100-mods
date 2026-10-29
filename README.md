@@ -1,6 +1,6 @@
 # godox-c100-mods
 
-<p align="center"><img src="docs/c100.jpg" alt="Godox C100" width="420"></p>
+<p align="center"><img src="firmware/docs/c100.jpg" alt="Godox C100" width="420"></p>
 
 Patches for the firmware of the Godox C100 card camera.
 
@@ -43,7 +43,7 @@ Built, not yet tested on the camera:
 - `webcam [MIN]` in `CMD.TXT`: one boot as the webcam whatever the switch.
 - `drive` in `CMD.TXT`: one boot as the USB drive whatever the switch.
 - Commands from the PC while the camera is the webcam, also while it streams
-  (`tools/c100cmd.py`).
+  (`firmware/tools/c100cmd.py`).
 
 Limits:
 
@@ -63,18 +63,18 @@ C100 product page on godox.com; sha256 `3fc9b15c…`), `arm-none-eabi-gcc` and
 [uv](https://docs.astral.sh/uv/). The update file is `c100_v1.1.6_20260929/GP_CARDVR_UPGRADE.BIN`
 in the zip.
 
-    ./build.sh path/to/GP_CARDVR_UPGRADE.BIN
+    firmware/build.sh path/to/GP_CARDVR_UPGRADE.BIN
 
-Output: `build/GP_CARDVR_UPGRADE.BIN`.
+Output: `firmware/build/GP_CARDVR_UPGRADE.BIN`.
 
-Emulator tests: `uv run --group test python tests/test_v5.py build/GP_CARDVR_UPGRADE.BIN obj/v5.sym`
+Emulator tests, in `firmware/`: `uv run --group test python tests/test_v5.py build/GP_CARDVR_UPGRADE.BIN obj/v5.sym`
 
-`./release.sh STOCK.BIN` builds, runs the tests and stages the release files in `dist/`.
+`firmware/release.sh STOCK.BIN` builds, runs the tests and stages the release files in `firmware/dist/`.
 
 ## Flash
 
 1. Charge the battery.
-2. Copy `build/GP_CARDVR_UPGRADE.BIN` to the root of the microSD card.
+2. Copy `firmware/build/GP_CARDVR_UPGRADE.BIN` to the root of the microSD card.
 3. Card in the camera, no USB cable, switch to Photo. The LED blinks for 10-15 s, the camera
    deletes the file and restarts by itself. The clock resets. Only the first card mount after
    power-on can flash: if nothing happens, switch off and on again with the card in.
@@ -82,7 +82,7 @@ Emulator tests: `uv run --group test python tests/test_v5.py build/GP_CARDVR_UPG
 ## Recovery
 
 Flash the stock V1.1.6 `GP_CARDVR_UPGRADE.BIN` the same way. The card updater is part of the
-firmware's app and runs on the first card mount after power-on. Details in `docs/firmware.md` and `docs/hooks.md`.
+firmware's app and runs on the first card mount after power-on. Details in `firmware/docs/firmware.md` and `firmware/docs/hooks.md`.
 
 ## C100.TXT
 
@@ -125,23 +125,23 @@ Commands, one per line, in the card root. Checked about every 3 s while the came
                         camera
     webcam [MIN]        restart as the webcam, whatever the switch, for that boot only; with
                         MIN (1 to 1440), restart again MIN minutes later and follow the switch
-                        (docs/usb.md). Not yet tested on the camera
+                        (firmware/docs/usb.md). Not yet tested on the camera
     drive               restart as the USB drive, whatever the switch, for that boot only
-                        (docs/usb.md). Not yet tested on the camera
+                        (firmware/docs/usb.md). Not yet tested on the camera
 
 ## Commands from the PC
 
 While the camera is the webcam, a Linux PC can send it one `CMD.TXT` line at a time, also while
 another program streams from it:
 
-    uv run tools/c100cmd.py display off
-    uv run tools/c100cmd.py drive
+    uv run firmware/tools/c100cmd.py display off
+    uv run firmware/tools/c100cmd.py drive
 
 The camera runs the line as if it came from `CMD.TXT` and logs it as `xu: <line>`; `drive` turns
 the webcam into the USB drive without touching the switch. The tool finds the camera by its USB
 ID (`--device /dev/videoN` to pick one) and needs only Python 3.11. Lines up to 32 characters.
 The camera takes a line only while it has a card and the patch loaded. The line goes through a
-UVC extension unit (docs/webcam.md). Not yet tested on the camera.
+UVC extension unit (firmware/docs/webcam.md). Not yet tested on the camera.
 
 ## LOG.TXT
 
@@ -168,11 +168,11 @@ The camera enumerates only when the cable goes into a camera that is already on.
 
 ## Docs
 
-- `docs/hardware.md`: board, screen, LED, buttons, pins
-- `docs/firmware.md`: image layout, boot, card updater, recovery limits
-- `docs/hooks.md`: how the patch works, the overlay, the hook table, the tests
-- `docs/usb.md`: USB modes and the states behind them, one boot as the webcam or the drive
-- `docs/webcam.md`: 1080p, frame sizes, left/right and recording while streaming, the extension
+- `firmware/docs/hardware.md`: board, screen, LED, buttons, pins
+- `firmware/docs/firmware.md`: image layout, boot, card updater, recovery limits
+- `firmware/docs/hooks.md`: how the patch works, the overlay, the hook table, the tests
+- `firmware/docs/usb.md`: USB modes and the states behind them, one boot as the webcam or the drive
+- `firmware/docs/webcam.md`: 1080p, frame sizes, left/right and recording while streaming, the extension
   unit
 
 ## Credits

@@ -1,4 +1,4 @@
-# Patch tests under emulation. usage, from the repo root after ./build.sh:
+# Patch tests under emulation. usage, from firmware/ after ./build.sh:
 #   uv run --group test python tests/test_v5.py build/GP_CARDVR_UPGRADE.BIN obj/v5.sym [BASE]
 # BASE defaults to obj/base.bin, the image tools/patch.py patched. ONLY=name runs only the
 # tests whose function name contains it.
