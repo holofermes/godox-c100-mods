@@ -7,8 +7,6 @@ going into its port. Inside: a Raspberry Pi Zero W, a 1200 mAh cell and its char
 1-bit OLED on the back. The camera runs as a USB webcam with the [firmware](../README.md#firmware),
 plugged into the Pi; the Pi runs [ghee](https://github.com/holofermes/ghee), which drives the OLED.
 
-In 3D: https://holofermes.github.io/godox-c100-mods/ (keys 1 to 3: solid, x-ray, wire).
-
 ## Parts
 
 | part | qty |
@@ -18,23 +16,21 @@ In 3D: https://holofermes.github.io/godox-c100-mods/ (keys 1 to 3: solid, x-ray,
 | [Adafruit USB Type C Plug Breakout #5978](https://www.adafruit.com/product/5978) | 1 |
 | [Argon ONE V5 OLED module](https://www.waveshare.com/argon-one-v5-oled-module.htm) | 1 |
 | [Adafruit LiPo 3.7 V 1200 mAh #258](https://www.adafruit.com/product/258) | 1 |
-| 470 µF 6.3 V capacitor (Panasonic EEU-FR0J471) | 1 |
+| 470 µF 6.3 V capacitor | 1 |
 | 4-pin connector pair, 1.25 mm pitch, with wires | 1 |
-| M2.5 heat-set insert, 3.4 mm (McMaster 94180A321) | 7 |
+| M2.5 heat-set insert, 3.4 mm | 7 |
 | M2.5 x 12 socket head screw | 4 |
 | M2.5 x 6 socket head screw | 3 |
 
 ## Print
 
-PLA, 0.2 mm layers. The back half prints on its back face with support from the plate only (it
-fills the screen's recess), the front half on its front face with none. `./build.sh case` writes
-both as STL and 3MF.
+Run `./build.sh case` to write out STL and 3MF.
 
 ## Assembly
 
 - Inserts: 4 in the front half's bosses, from their open ends; 1 in the plug board's block; 2 in
   the screen's bosses, from the screen's recess.
-- The power board's USB-A socket comes off: its pads carry the camera's 5V.
+- The power board's USB-A socket must come off, use some pliers to cut the feet and pry it away, peel off the leads
 - Wire each half, plug the halves' connector together, close with the four M2.5 x 12 from the
   back.
 
@@ -76,5 +72,21 @@ Needs [uv](https://docs.astral.sh/uv/).
 
 `out/case-NN/` holds the STL and 3MF of each half, `assembly.glb` and `assembly.step`,
 `print.md` (bodies, hardware, parts), `checks.json`, `sizes.json` (sizes and notes),
-`config.json` (the settings) and `render.json` (what the viewer and the renders read). Part sizes and pads are in `parts.json`, each with its sources;
-`estimate` marks the ones not measured.
+`config.json` (the settings) and `render.json` (what the viewer and the renders read).
+
+## Changing it
+
+- `designs/case.py` is the design: its `Config` holds the settings, `build()` places the parts
+  and models both halves. `lib/` holds the shared pieces: parts, geometry, the camera, checks,
+  export, renders.
+- Frame: X across the camera, Y from its back to its front, Z up, Z 0 at the camera's bottom.
+  Each half prints on its outer face, so a holder grows from that face along Y; faces past 45
+  degrees need support.
+- Sizes come from `parts.json`, each with its source; `estimate` marks the ones not measured. A
+  size or feature that is missing stops the build.
+- After a change: all checks pass (`./build.sh case` exits 0) and the renders look right. A change
+  meant to leave the halves alone leaves `back.stl` and `front.stl` byte-identical.
+- After a change to the halves: copy `out/case-NN/assembly.glb` and `render.json` to
+  `viewer/case.glb` and `viewer/case.json` and replace the changed renders in `images/`. After a
+  change to the wiring: `uv run python wiring.py` and the table above.
+- Lint: `uv run ruff format . && uv run ruff check .`
