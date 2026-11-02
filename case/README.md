@@ -6,6 +6,7 @@ A printed case in two halves. The C100 sits in a cup on top, with a USB-C plug i
 going into its port. Inside: a Raspberry Pi Zero W, a 1200 mAh cell and its charger, and a 128x64
 1-bit OLED on the back. The camera runs as a USB webcam with the [firmware](../README.md#firmware),
 plugged into the Pi; the Pi runs [ghee](https://github.com/holofermes/ghee), which drives the OLED.
+How the OLED shows the camera: [display.md](display.md).
 
 ## Parts
 
