@@ -1,6 +1,6 @@
 # godox-c100-mods
 
-<p align="center"><img src="case/images/case.jpg" alt="Godox C100 in the case" width="420"></p>
+<p align="center"><img src="case/images/front-back.webp" alt="Godox C100 in the case, a cat sniffing it; the OLED on the case's back showing the backyard, close up and whole" width="800"></p>
 
 Mods for the Godox C100 card camera:
 
